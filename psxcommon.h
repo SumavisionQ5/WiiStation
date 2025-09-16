@@ -121,6 +121,7 @@ typedef struct {
 	bool icache_emulation;
 	bool DisableStalls;
 	bool PreciseExceptions;
+	bool TurboCD; // new experimental TurboCD option
 	int cycle_multiplier; // 100 for 1.0
 	int cycle_multiplier_override;
 	int gpu_timing_override;
