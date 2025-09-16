@@ -678,14 +678,14 @@ static void cdrPlayInterrupt_Autopause(s16* cddaBuf)
 }
 
 
-/*static bool canDoTurbo(void)
+static bool canDoTurbo(void)
 {
 	u32 c = psxRegs.cycle;
 	return fastLoad && !cdr.RetryDetected && !cdr.AdpcmActive
 		//&& c - psxRegs.intCycle[PSXINT_SPUDMA].sCycle > (u32)cdReadTime * 2
 		&& c - psxRegs.intCycle[PSXINT_MDECOUTDMA].sCycle > (u32)cdReadTime * 16;
 }
-*/
+
 
 static int cdrSeekTime(unsigned char *target)
 {
@@ -946,7 +946,7 @@ void cdrInterrupt(void) {
 			}
 			else
 			{
-				set_loc[0] = btoi(cdr.Param[0]);
+				/* set_loc[0] = btoi(cdr.Param[0]);
 				set_loc[1] = btoi(cdr.Param[1]);
 				set_loc[2] = btoi(cdr.Param[2]);
 				set_loc[3] = 0;
@@ -955,7 +955,17 @@ void cdrInterrupt(void) {
 					cdr.RetryDetected++;
 				else
 					cdr.RetryDetected = 0;
-				*((u32*)cdr.SetSector) = *((u32*)set_loc);
+				*((u32*)cdr.SetSector) = *((u32*)set_loc); */
+				
+				// copy from pcsx-rearmed
+				for (i = 0; i < 3; i++)
+					set_loc[i] = btoi(cdr.Param[i]);
+				cdr.RetryDetected = msfiEq(cdr.SetSector, set_loc)
+					&& !cdr.SetlocPending;
+				//cdr.RetryDetected |= msfiEq(cdr.Param, cdr.Transfer);
+				memcpy(cdr.SetSector, set_loc, 3);
+				cdr.SetSector[3] = 0;
+				
 				cdr.SetlocPending = 1;
 				cdr.errorRetryhack = 0;
 			}
@@ -1255,7 +1265,7 @@ void cdrInterrupt(void) {
 			StopReading();
 			SetPlaySeekRead(cdr.StatP, STATUS_SEEK | STATUS_ROTATING);
 
-			if (fastLoad)
+			/* if (fastLoad)
 			{
 				seekTime = WaitTime1st;
 			}
@@ -1263,8 +1273,14 @@ void cdrInterrupt(void) {
 			{
 				seekTime = cdrSeekTime(cdr.SetSector);
 			}
-			*((u32*)cdr.SetSectorPlay) = *((u32*)cdr.SetSector);
+			*((u32*)cdr.SetSectorPlay) = *((u32*)cdr.SetSector); */
+			
+			if (!canDoTurbo())
+				seekTime = cdrSeekTime(cdr.SetSector);
+			memcpy(cdr.SetSectorPlay, cdr.SetSector, 4);
+			
 			cdr.DriveState = DRIVESTATE_SEEK;
+			
 			/*
 			Crusaders of Might and Magic = 0.5x-4x
 			- fix cutscene speech start
@@ -1432,6 +1448,8 @@ void cdrInterrupt(void) {
 			cycles += seekTime;
 			if (Config.hacks.cdr_read_timing)
 				cycles = cdrAlignTimingHack(cycles);
+			else if (canDoTurbo())
+				cycles = cdReadTime / 2;
 			CDRPLAYREAD_INT(cycles, 1);
 
 			SetPlaySeekRead(cdr.StatP, STATUS_SEEK);
@@ -1886,6 +1904,8 @@ void psxDma3(u32 madr, u32 bcr, u32 chcr) {
 				// halted
 				psxRegs.cycle += cycles - 20;
 			}
+			if (canDoTurbo() && cdr.Reading && cdr.FifoOffset >= 2048)
+				CDRPLAYREAD_INT(cycles + 4096, 1);
 			return;
 
 		default:
