@@ -2,23 +2,23 @@
 
 # WiiStation
 
-WiiStation (formerly WiiSXRX_2022), is a Sony PlayStation 1 (PS1/PSX/PSone) emulator, forked from the original WiiSX-RX (https://github.com/niuus/WiiSXRX) emulator by NiuuS, originally a port of PCSX-Reloaded, but with many changes from PCSX-ReARMed, for the Nintendo Wii/Wii U.
+WiiStation (formerly WiiSXRX_2022) is a Sony PlayStation 1 (PS1/PSX/PSone) emulator, forked from the original WiiSX-RX (https://github.com/niuus/WiiSXRX) emulator by NiuuS, originally a port of PCSX-Reloaded, but with many changes from PCSX-ReARMed, for the Nintendo Wii/Wii U.
 
 ## The following changes have been made to the code based on WiiSXRX.
 
 * HID controllers support!
 
-  Supported controllers referred to [Nintendont](https://github.com/FIX94/Nintendont).
+  Supported controllers are the same as those supported by [Nintendont](https://github.com/FIX94/Nintendont).
 
   If you want to add controllers beyond what Nintendont supports, you need to add a new INI configuration file. The process should be as follows:
   
   Connect your HID controller to the Wii, and then start **HID_Test.dol** (please modify it to **boot.dol**). If the controller is supported, you will see normal connection information and information when each button is pressed.
-  Send me the information when each button is pressed, and I will create an INI file. Or, refer to 0810_0003.ini to create your INI file.
+  Send me the information for each button press, and I will create an INI file. Or, refer to 0810_0003.ini to create your INI file.
   You can refer to the information in this link:
   https://gbatemp.net/threads/nintendont-custom-controller-configuration-file.633068/#post-10164777
 
 * Incorporating the latest CDROM and CDRISO codes from PCSX-ReARMed, the compatibility of the system has been greatly improved.
-  Many games that could not be run or had problems before can be run now.
+  Many games that previously could not run or had issues can now run properly.
 
 * CDDA (Compact Disc Digital Audio) tracks & multi-tracks support.
 
@@ -27,21 +27,21 @@ WiiStation (formerly WiiSXRX_2022), is a Sony PlayStation 1 (PS1/PSX/PSone) emul
 * Combined the latest DFSound module from PCSX-ReARMed and used the SDL library.
   The sound quality of the system has been greatly improved.
 
-* Adding the new, updated PSX dynamic recompiler [Lightrec](https://github.com/pcercuei/lightrec) by pcercuei, the speed/performance of the emulation is greatly improved. The 'new' PPC Dynarec is kept as an option in case compatibility or speed changes much.
+* By adding the new, updated PSX dynamic recompiler [Lightrec](https://github.com/pcercuei/lightrec) by pcercuei, the speed and performance of the emulation have been greatly improved. The 'new' PPC Dynarec is kept as an option in case compatibility or speed changes much.
 
-* Posibility of selecting between the old GPU video plugin based on **P.E.Op.S. Soft GPU** (slightly faster) and the new GPU video plugin based on **gpulib + DFXVideo** (more compatible).
+* Possibility to select between the old GPU video plugin based on **P.E.Op.S. Soft GPU** (slightly faster) and the new GPU video plugin based on **gpulib + DFXVideo** (more compatible).
 
 * 240p support!
 
-* Interlace mode support - renders the games to a resolution close to the real PSX hardware (480i mode), which gives full speed to 480i games!
+* Interlace mode support - renders the games to a resolution close to the real PSX hardware (480i mode), which allows 480i games to run at full speed!
 
-* Posibility of enabling/disabling bilinear, trap, and deflicker filters!
+* Option to enable/disable bilinear, trap, and deflicker filters!
 
 * PS1 Lightguns support! Both **Namco GunCon** and **Konami Justifier** lightguns are supported and emulated with the Wiimotes! (Needs to be enabled in emulator settings and calibrate them by using the in-game calibration screen)
 
 * Experimental PS1 Mouse support via the Wiimote IR.
 
-* PS1 Multitap support! With options for enabling them on both Port 1 and Port 2, supports up to 8 players. (Needs to be enabled in emulator settings and controllers need to be set for use the Multitap adequately)
+* PS1 Multitap support! With options for enabling it on both Port 1 and Port 2, the emulator supports up to 8 players. (Needs to be enabled in emulator settings, and controllers need to be set to use the Multitap properly)
 
 * Support for BIN+CUE, ISO, IMG, and eboot PBP (a compressed format for PS1 games on PSP) formats.
 
@@ -51,7 +51,7 @@ WiiStation (formerly WiiSXRX_2022), is a Sony PlayStation 1 (PS1/PSX/PSone) emul
   At first, I wanted to refer to Snes9x GX and support TTF font library.
   However, it encountered a memory leak problem, resulting in automatic exit.
   So it can only be made into a specific font.
-  Font char information: first two byte: BigEndianUnicode char code, followed by a character picture in IA8 format with a size of 24 * 24.
+  Font character information: the first two byte: BigEndianUnicode char code, followed by a character picture in IA8 format with a size of 24 * 24.
 
 * For some customized Chinese culture games, specific BIOS is automatically loaded.
   For example:  sd:\wiisxrx\isos\武藏传.ISO => sd:\wiisxrx\bios\武藏传.bin
@@ -65,9 +65,9 @@ WiiStation (formerly WiiSXRX_2022), is a Sony PlayStation 1 (PS1/PSX/PSone) emul
 * Modification of some dynamic compilation instructions on the PPC Dynarec, such as SLLV, SRLV, SRAV, Final Fantasy 9 and Biohazard 3 (Resident Evil 3) can be run.
 (Part of the division instruction uses a static compilation instruction)
 
-* Emulation of more instructions, such BREAK and SYSCALL, makes more games to be playable with the PPC Dynarec (ex., EA Sports F1 2000).
+* Emulation of more instructions, such as BREAK and SYSCALL, makes more games playable with the PPC Dynarec(ex., EA Sports F1 2000).
 
-* Many other emulation, speed and events improvements, some of them courtesy of PCSX-ReARMed.
+* Many other improvements to emulation, speed, and events, some of them courtesy of PCSX-ReARMed.
 
 ## Goals
 
@@ -82,7 +82,7 @@ WiiStation (formerly WiiSXRX_2022), is a Sony PlayStation 1 (PS1/PSX/PSone) emul
 * Use the graphics display mode of GL to provide image quality and performance.
   (At least transplant the texture caching logic in OpenGL, it may improve running efficiency/performance.)
 
-Any help is appreciated.
+Any help would be greatly appreciated.
 
 ## Compilation information
 
