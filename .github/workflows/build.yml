@@ -44,18 +44,24 @@ jobs:
           set -e
           DEVPAGE="https://wii.leseratte10.de/devkitPro/devkitPPC/r41%20%282022-05-31%29/"
           echo "=== 列出 r41 目录中的 devkitPPC 包 ==="
-          wget -qO- "$DEVPAGE" | grep -oE 'href="[^"]*"' | grep -E "devkitPPC-r41" || true
-          FILE=$(wget -qO- "$DEVPAGE" | grep -oE 'devkitPPC-r41-2[^"<]*linux_x86_64[^"<]*\.pkg\.tar\.zst' | head -1)
+          wget -qO- "$DEVPAGE" | grep -oE 'devkitPPC-r41-2[^"<]*linux_x86_64[^"<]*\.pkg\.tar\.(xz|zst)' || true
+          # 优先匹配 .xz（实际文件名），.zst 作备选
+          FILE=$(wget -qO- "$DEVPAGE" | grep -oE 'devkitPPC-r41-2[^"<]*linux_x86_64[^"<]*\.pkg\.tar\.(xz|zst)' | head -1)
           echo "解析到文件: $FILE"
-          wget -q "${DEVPAGE}${FILE}" -O devkitPPC.pkg.tar.zst
-          ls -la devkitPPC.pkg.tar.zst
+          [ -n "$FILE" ] || { echo "!! 文件名解析失败"; exit 1; }
+
+          wget -q "${DEVPAGE}${FILE}"
+          ls -la "$FILE"
 
           mkdir -p /tmp/dkp /opt/devkitpro
-          tar --zstd -xf devkitPPC.pkg.tar.zst -C /tmp/dkp
+          # GNU tar 能自动识别 xz / zst 压缩格式，无需手动指定
+          tar -xf "$FILE" -C /tmp/dkp
           echo "=== pacman 包内部结构 ==="
           find /tmp/dkp -maxdepth 4 -type d | head -30
+          # 把内容合并到 /opt/devkitpro
           cp -r /tmp/dkp/opt/devkitpro/* /opt/devkitpro/ 2>/dev/null || \
           cp -r /tmp/dkp/usr/* /opt/devkitpro/ 2>/dev/null || true
+          echo "=== /opt/devkitpro ==="
           ls /opt/devkitpro
 
       - name: 下载并安装作者的预编译库（libogc2 + Lightning + Lightrec）
