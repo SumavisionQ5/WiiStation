@@ -1256,7 +1256,7 @@ void cdrInterrupt(void) {
 			SetPlaySeekRead(cdr.StatP, STATUS_SEEK | STATUS_ROTATING);
 
 			if (!canDoTurbo())
-+				seekTime = cdrSeekTime(cdr.SetSector);
+				seekTime = cdrSeekTime(cdr.SetSector);
 			*((u32*)cdr.SetSectorPlay) = *((u32*)cdr.SetSector);
 			cdr.DriveState = DRIVESTATE_SEEK;
 			/*
@@ -1421,7 +1421,7 @@ void cdrInterrupt(void) {
 			if (Config.hacks.cdr_read_timing)
 				cycles = cdrAlignTimingHack(cycles);
 			else if (canDoTurbo())
-+				cycles = cdReadTime / 2;
+				cycles = cdReadTime / 2;
 			CDRPLAYREAD_INT(cycles, 1);
 
 			SetPlaySeekRead(cdr.StatP, STATUS_SEEK);
@@ -1877,7 +1877,7 @@ void psxDma3(u32 madr, u32 bcr, u32 chcr) {
 				psxRegs.cycle += cycles - 20;
 			}
 			if (canDoTurbo() && cdr.Reading && cdr.FifoOffset >= 2048)
-+				CDRPLAYREAD_INT(cycles + 4096, 1);
+				CDRPLAYREAD_INT(cycles + 4096, 1);
 			return;
 
 		default:
