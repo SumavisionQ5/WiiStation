@@ -170,6 +170,48 @@ jobs:
             wget -q --spider "$URL" && echo "  存在" || echo "  不存在"
           done
 
+      - name: 创建 bin2s 等价脚本（devkitPro 格式）
+        run: |
+          set -e
+          export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
+          mkdir -p /opt/devkitpro/tools/bin
+
+          # 确认 as 可用（bin2s 输出要喂给 as）
+          if ! command -v as >/dev/null 2>&1; then
+            echo "as 不在 PATH，创建符号链接..."
+            ln -sf /opt/devkitpro/devkitPPC/bin/powerpc-eabi-as /opt/devkitpro/devkitPPC/bin/as
+          fi
+
+          cat > /opt/devkitpro/tools/bin/bin2s << 'EOF'
+          #!/bin/bash
+          # 简易 bin2s：把二进制文件转成汇编（符号名与 devkitPro 一致，不带下划线前缀）
+          ALIGN=4
+          FILE=""
+          while [ $# -gt 0 ]; do
+            case "$1" in
+              -a) ALIGN="$2"; shift 2;;
+              *)  FILE="$1"; shift;;
+            esac
+          done
+          [ -n "$FILE" ] || { echo "usage: bin2s [-a align] file" >&2; exit 1; }
+          NAME=$(basename "$FILE" | sed 's/^\([0-9]\)/_\1/' | sed 's/[^A-Za-z0-9_]/_/g')
+          echo ".section .rodata"
+          echo ".align $ALIGN"
+          echo ".global $NAME"
+          echo "$NAME:"
+          echo ".incbin \"$FILE\""
+          echo ".global ${NAME}_end"
+          echo "${NAME}_end:"
+          echo ".global ${NAME}_size"
+          echo ".set ${NAME}_size, ${NAME}_end - ${NAME}"
+          EOF
+          chmod +x /opt/devkitpro/tools/bin/bin2s
+
+          echo "=== 测试 bin2s ==="
+          /opt/devkitpro/tools/bin/bin2s -a 32 /etc/hostname | head -10
+          echo "=== 测试管道到 as ==="
+          /opt/devkitpro/tools/bin/bin2s -a 32 /etc/hostname | as -o /tmp/test.o && echo "✅ bin2s + as 链路正常" || echo "!! as 有问题"
+
       - name: 构建
         run: |
           set -e
