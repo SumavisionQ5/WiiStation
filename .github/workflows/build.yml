@@ -115,6 +115,21 @@ jobs:
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
 
+          # 0. 去掉 -flto（避免 .elf 巨大）
+          echo "=== 去掉 -flto ==="
+          find Gamecube -name "Makefile*" -exec sed -i 's/-flto//g' {} \; 2>/dev/null || true
+          sed -i 's/-flto//g' /opt/devkitpro/devkitPPC/base_rules \
+                            /opt/devkitpro/devkitPPC/wii_rules \
+                            /opt/devkitpro/libogc2/wii_rules 2>/dev/null || true
+
+          # 0b. 修 psxmem.c 的 impossible constraint（去掉 -flto 后必现）
+          echo "=== 修补 psxmem.c CAST_SetGQR ==="
+          grep -n "__set_gqr" psxmem.c | head -5
+          sed -i 's|__set_gqr(GQR,val);|switch(GQR){case 0:__set_gqr(0,val);break;case 1:__set_gqr(1,val);break;case 2:__set_gqr(2,val);break;case 3:__set_gqr(3,val);break;case 4:__set_gqr(4,val);break;case 5:__set_gqr(5,val);break;case 6:__set_gqr(6,val);break;case 7:__set_gqr(7,val);break;case 8:__set_gqr(8,val);break;case 9:__set_gqr(9,val);break;case 10:__set_gqr(10,val);break;case 11:__set_gqr(11,val);break;case 12:__set_gqr(12,val);break;case 13:__set_gqr(13,val);break;case 14:__set_gqr(14,val);break;case 15:__set_gqr(15,val);break;default:break;}|' psxmem.c 2>/dev/null || true
+
+          # 0c. 清理重编
+          rm -rf Gamecube/build_release Gamecube/build_debug
+
           EXTRA="SILENTMSG=@echo SILENTCMD=@ \
             CC=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-gcc \
             CXX=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++ \
@@ -128,22 +143,32 @@ jobs:
                 deps/libchdr/deps/zlib-1.3.1/zconf.h \
                 /opt/devkitpro/libogc2/include/ 2>/dev/null || true
 
-          # 2. 第一次 make（编译依赖库，链接阶段缺 -lz / -lopengx 属预期）
-          make Wii_Release -j$(nproc) $EXTRA || echo "首次链接失败，库已生成"
+          # 2. 第一次 make（编译依赖库）
+          make Wii_Release -j$(nproc) $EXTRA || echo "首次构建失败，继续尝试"
 
           # 3. 复制缺失库
           mkdir -p /opt/devkitpro/libogc2/lib/wii
           cp -v deps/libchdr/deps/zlib-1.3.1/bin/lib/libzlibstatic.a \
-                /opt/devkitpro/libogc2/lib/wii/libz.a
+                /opt/devkitpro/libogc2/lib/wii/libz.a 2>/dev/null || true
           cp -v deps/opengx/lib/libOpengx.a \
-                /opt/devkitpro/libogc2/lib/wii/libopengx.a
+                /opt/devkitpro/libogc2/lib/wii/libopengx.a 2>/dev/null || true
 
-          # 4. 第二次 make（链接并生成 .dol）
+          # 4. 第二次 make
           make Wii_Release -j$(nproc) $EXTRA || echo "elf2dol 失败，由 Python 兜底"
 
-          # 5. Python ELF→DOL 转换
+          # 5. 检查 .elf 大小（关键）
+          ELF=$(find . -name "WiiSXRX_Release.elf" | head -1)
+          ELFSIZE=$(stat -c %s "$ELF")
+          echo "=== .elf 大小: $ELFSIZE 字节 ($((ELFSIZE/1024/1024)) MB) ==="
+          if [ "$ELFSIZE" -gt 209715200 ]; then
+            echo "!! .elf 仍巨大，打印段信息"
+            /opt/devkitpro/devkitPPC/bin/powerpc-eabi-readelf -l "$ELF" 2>/dev/null | head -60
+            exit 1
+          fi
+
+          # 6. Python ELF→DOL 转换（脚本同前，验证大小）
           python3 - << 'PYEOF'
-          import struct, os, sys
+          import struct, os
 
           def elf_to_dol(data):
               if data[:4] != b'\x7fELF' or data[4] != 1 or data[5] != 2:
@@ -208,11 +233,9 @@ jobs:
                   if fn == 'WiiSXRX_Release.elf':
                       elf = os.path.join(root, fn)
                       dol = elf[:-4] + '.dol'
-                      if os.path.exists(dol):
-                          sz = os.path.getsize(dol)
-                          if 1048576 <= sz <= 314572800:
-                              print(f"✅ 已存在正常 .dol: {dol} ({sz // 1048576} MB)")
-                              continue
+                      if os.path.exists(dol) and 1048576 <= os.path.getsize(dol) <= 314572800:
+                          print(f"✅ 已存在正常 .dol: {dol}")
+                          continue
                       print(f"转换: {elf}")
                       with open(elf, 'rb') as f:
                           data = f.read()
