@@ -227,10 +227,15 @@ jobs:
         run: |
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
-          # 关键：显式提供 base_tools 缺失的静默控制变量
+          # 关键：显式指定所有交叉工具（base_tools 缺失这些定义）
           make -j$(nproc) \
             SILENTMSG='@echo' \
-            SILENTCMD='@'
+            SILENTCMD='@' \
+            CC=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-gcc \
+            CXX=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++ \
+            AS=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-as \
+            LD=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++ \
+            AR=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-ar
 
       - name: 收集产物
         run: |
