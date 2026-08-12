@@ -152,6 +152,39 @@ jobs:
           find /opt/devkitpro -name "liblightrec*" 2>/dev/null | head
           find /opt/devkitpro -name "liblightning*" 2>/dev/null | head
 
+      - name: 安装 devkitPro tools（bin2s / elf2dol 等）
+        run: |
+          set -e
+          export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
+
+          echo "=== 检查 bin2s 是否已存在 ==="
+          find /opt/devkitpro -name "bin2s" 2>/dev/null || true
+
+          if [ ! -x /opt/devkitpro/tools/bin/bin2s ]; then
+            echo "=== 从 devkitPro 官方 pacman 仓库下载 devkitpro-tools 包 ==="
+            # devkitPro 官方 Linux 仓库
+            REPO="https://pkg.devkitpro.org/devkitpro-linux"
+            echo "=== 列出仓库中的 tools 包 ==="
+            wget -qO- "$REPO/x86_64/" 2>/dev/null | grep -oE 'devkitpro-tools[^"<]*\.pkg\.tar\.(zst|xz)' | sort -u | tail -5 || true
+
+            PKG=$(wget -qO- "$REPO/x86_64/" 2>/dev/null | grep -oE 'devkitpro-tools[^"<]*\.pkg\.tar\.zst' | sort -u | tail -1)
+            echo "解析到包: $PKG"
+            [ -n "$PKG" ] || { echo "!! 仓库解析失败"; exit 1; }
+            wget -q "$REPO/x86_64/$PKG" -O tools.pkg.tar.zst
+            ls -la tools.pkg.tar.zst
+
+            mkdir -p /tmp/tools
+            tar -xf tools.pkg.tar.zst -C /tmp/tools
+            echo "=== 包内容 ==="
+            find /tmp/tools -maxdepth 4 -name "bin2s" -o -maxdepth 4 -name "elf2dol" 2>/dev/null
+            # 合并到 /opt/devkitpro
+            cp -r /tmp/tools/opt/devkitpro/* /opt/devkitpro/ 2>/dev/null || \
+            cp -r /tmp/tools/usr/* /opt/devkitpro/ 2>/dev/null || true
+          fi
+
+          echo "=== 验证 bin2s ==="
+          ls -la /opt/devkitpro/tools/bin/bin2s 2>/dev/null && echo "✅ bin2s 就位" || echo "!! bin2s 仍缺失"
+
       - name: 构建
         run: |
           set -e
