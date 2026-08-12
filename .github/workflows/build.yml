@@ -212,42 +212,36 @@ jobs:
           echo "=== 测试管道到 as ==="
           /opt/devkitpro/tools/bin/bin2s -a 32 /etc/hostname | as -o /tmp/test.o && echo "✅ bin2s + as 链路正常" || echo "!! as 有问题"
 
-      - name: 诊断 GamecubeMain.cpp 路径问题
-        run: |
-          echo "=== Gamecube 目录内容 ==="
-          ls -la Gamecube/ 2>/dev/null
-          echo "=== 全仓库查找 GamecubeMain.cpp ==="
-          find . -name "GamecubeMain.cpp" 2>/dev/null
-          echo "=== Makefile_Wii_Release 中 SOURCES/VPATH 相关行 ==="
-          grep -nE "SOURCES|VPATH|CPPFILES|CFILES|BUILD" Gamecube/Makefile_Wii_Release 2>/dev/null | head -30
-          echo "=== base_rules 第 1~20 行 ==="
-          sed -n '1,20p' /opt/devkitpro/devkitPPC/base_rules
-
-      - name: 诊断 elf2dol 编译环境
-        run: |
-          set -e
-          echo "=== elftool 目录完整内容 ==="
-          ls -la /tmp/gct/elftool/ 2>/dev/null || {
-            git clone --depth=1 https://github.com/devkitPro/gamecube-tools /tmp/gct
-            ls -la /tmp/gct/elftool/
-          }
-          echo "=== elf2dol.c 的 include 行 ==="
-          grep -n "#include" /tmp/gct/elftool/elf2dol.c
-          echo "=== elf2dol.c 中报错相关代码 ==="
-          grep -n "Bad address\|reading ELF segment\|pread\|malloc" /tmp/gct/elftool/elf2dol.c | head -20
-          echo "=== bswap.h 是否存在 ==="
-          ls -la /tmp/gct/elftool/bswap.h 2>/dev/null || echo "(无 bswap.h)"
-
       - name: 构建 WiiSXRX（生成 .dol）
         run: |
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
 
-          # 0. 编译并安装 elf2dol
-          git clone --depth=1 https://github.com/devkitPro/gamecube-tools /tmp/gct 2>/dev/null || true
-          (cd /tmp/gct/elftool && gcc -O2 -o elf2dol elf2dol.c) || true
+          # 0. 编译并安装 elf2dol（多策略自动重试，解决大小端问题）
           mkdir -p /opt/devkitpro/tools/bin
-          cp -v /tmp/gct/elftool/elf2dol /opt/devkitpro/tools/bin/ 2>/dev/null || true
+          [ -d /tmp/gct ] || git clone --depth=1 https://github.com/devkitPro/gamecube-tools /tmp/gct
+          cd /tmp/gct/elftool
+
+          # 策略 1：默认直接编译
+          echo "=== 尝试默认编译 ==="
+          if gcc -O2 -o elf2dol elf2dol.c 2>/dev/null; then
+            cp -v elf2dol /opt/devkitpro/tools/bin/
+            echo "✅ 默认编译成功"
+          else
+            # 策略 2：加字节序宏重试
+            for FLAG in "-DWORDS_BIGENDIAN" "-D_BYTE_ORDER=_BIG_ENDIAN" "-D__BIG_ENDIAN__"; do
+              echo "=== 尝试 $FLAG ==="
+              if gcc -O2 $FLAG -o elf2dol elf2dol.c 2>/dev/null; then
+                cp -v elf2dol /opt/devkitpro/tools/bin/
+                echo "✅ $FLAG 编译成功"
+                break
+              fi
+            done
+          fi
+
+          # 验证 elf2dol 已就位
+          [ -x /opt/devkitpro/tools/bin/elf2dol ] || { echo "!! elf2dol 编译失败"; exit 1; }
+          cd /__w/WiiStation/WiiStation
 
           EXTRA="SILENTMSG=@echo SILENTCMD=@ \
             CC=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-gcc \
