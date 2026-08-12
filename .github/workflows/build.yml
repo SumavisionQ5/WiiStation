@@ -122,6 +122,24 @@ jobs:
           wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/libSDL.a" -O /opt/devkitpro/portlibs/wii/lib/libSDL.a
           ls -la /opt/devkitpro/portlibs/wii/lib/libSDL.a
 
+      - name: 诊断并补齐 base_tools
+        run: |
+          set -e
+          echo "=== devkitPPC 目录当前内容 ==="
+          ls -la /opt/devkitpro/devkitPPC/ | head -30
+          echo "=== 系统里查找 base_tools ==="
+          find / -name "base_tools" 2>/dev/null | head
+
+          # 如果确实缺失，从 devkitPro 官方仓库下载标准 base_tools
+          if [ ! -f /opt/devkitpro/devkitPPC/base_tools ]; then
+            echo "=== 从 devkitPro 官方下载 base_tools ==="
+            wget -q "https://raw.githubusercontent.com/devkitPro/buildscripts/master/devkitPPC/base_tools" \
+              -O /opt/devkitpro/devkitPPC/base_tools || \
+            wget -q "https://raw.githubusercontent.com/devkitPro/buildscripts/master/rules/base_tools" \
+              -O /opt/devkitpro/devkitPPC/base_tools || true
+          fi
+          ls -la /opt/devkitpro/devkitPPC/base_tools 2>/dev/null && echo "✅ base_tools 就位" || echo "!! 仍无 base_tools"
+
       - name: 设置环境变量并验证工具链
         run: |
           echo "DEVKITPRO=/opt/devkitpro" >> $GITHUB_ENV
