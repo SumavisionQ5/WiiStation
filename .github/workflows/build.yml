@@ -69,6 +69,21 @@ jobs:
           echo "=== /opt/devkitpro ==="
           ls /opt/devkitpro
 
+      - name: 探查 buildscripts 并获取 base_tools
+        run: |
+          set -e
+          echo "=== buildscripts 目录结构 ==="
+          wget -qO- "https://wii.leseratte10.de/devkitPro/buildscripts/" | grep -oE 'href="[^"]*"' | head -40
+          echo "=== 尝试直接下载 base_tools（常见路径）==="
+          for URL in \
+            "https://wii.leseratte10.de/devkitPro/buildscripts/devkitPPC/base_tools" \
+            "https://wii.leseratte10.de/devkitPro/buildscripts/rules/base_tools" \
+            "https://raw.githubusercontent.com/devkitPro/buildscripts/master/devkitPPC/base_tools" \
+            "https://raw.githubusercontent.com/devkitPro/buildscripts/master/rules/base_tools"; do
+            echo "--- $URL ---"
+            wget -q --spider "$URL" && echo "存在" || echo "404"
+          done
+
       - name: 下载并安装作者的预编译库（libogc2 + Lightning + Lightrec + 修改版 rules）
         run: |
           set -e
