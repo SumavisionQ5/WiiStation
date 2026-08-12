@@ -9,14 +9,26 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:22.04          # 用干净 Ubuntu，因为要装指定旧版 devkitPPC
+      image: ubuntu:22.04
       options: --user root
 
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+
     steps:
+      # ↓↓↓ 关键：先装 git，checkout 才能用本地 git 模式（支持子模块）↓↓↓
+      - name: 安装基础工具（含 git，checkout 必需）
+        run: |
+          apt-get update
+          apt-get install -y \
+            git ca-certificates \
+            wget curl zstd unzip bzip2 xz-utils \
+            make gcc g++ file
+
       - name: 检出源码（含子模块）
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: recursive   # 若报 .gitmodules 错误，改成 false
 
       - name: 探查项目结构（调试用）
         run: |
@@ -27,19 +39,12 @@ jobs:
           echo "=== pcsx_rearmed 目录 ==="
           ls pcsx_rearmed/ 2>/dev/null | head -20 || echo "(无 pcsx_rearmed 目录)"
 
-      - name: 安装基础工具
-        run: |
-          apt-get update
-          apt-get install -y wget curl ca-certificates zstd unzip bzip2 xz-utils make gcc g++ git file
-
       - name: 下载并安装 devkitPPC r41-2
         run: |
           set -e
-          # r41 目录（leseratte10 旧版镜像站）[1][2]
           DEVPAGE="https://wii.leseratte10.de/devkitPro/devkitPPC/r41%20%282022-05-31%29/"
           echo "=== 列出 r41 目录中的 devkitPPC 包 ==="
           wget -qO- "$DEVPAGE" | grep -oE 'href="[^"]*"' | grep -E "devkitPPC-r41" || true
-          # 自动解析 r41-2 linux_x86_64 包名
           FILE=$(wget -qO- "$DEVPAGE" | grep -oE 'devkitPPC-r41-2[^"<]*linux_x86_64[^"<]*\.pkg\.tar\.zst' | head -1)
           echo "解析到文件: $FILE"
           wget -q "${DEVPAGE}${FILE}" -O devkitPPC.pkg.tar.zst
@@ -49,16 +54,13 @@ jobs:
           tar --zstd -xf devkitPPC.pkg.tar.zst -C /tmp/dkp
           echo "=== pacman 包内部结构 ==="
           find /tmp/dkp -maxdepth 4 -type d | head -30
-          # 把内容合并到 /opt/devkitpro
           cp -r /tmp/dkp/opt/devkitpro/* /opt/devkitpro/ 2>/dev/null || \
           cp -r /tmp/dkp/usr/* /opt/devkitpro/ 2>/dev/null || true
-          echo "=== /opt/devkitpro ==="
           ls /opt/devkitpro
 
       - name: 下载并安装作者的预编译库（libogc2 + Lightning + Lightrec）
         run: |
           set -e
-          # 文件名里有 + 号，URL 编码两种写法都试
           wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec%2BLibogc2.zip" -O libs.zip || \
           wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec+Libogc2.zip" -O libs.zip
           ls -la libs.zip
@@ -66,7 +68,6 @@ jobs:
           unzip -o libs.zip -d /tmp/libs
           echo "=== zip 内容结构 ==="
           find /tmp/libs -maxdepth 3 | head -50
-          # 合并到 devkitPro 目录
           cp -r /tmp/libs/* /opt/devkitpro/ 2>/dev/null || true
 
       - name: 安装作者的 libSDL.a
@@ -91,7 +92,6 @@ jobs:
         run: |
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
-          # 自动定位构建目录
           if [ -f Makefile ] || [ -f makefile ]; then BD=".";
           elif [ -d pcsx_rearmed ] && [ -f pcsx_rearmed/Makefile ]; then BD="pcsx_rearmed";
           else BD="pcsx_rearmed"; fi
@@ -102,10 +102,8 @@ jobs:
       - name: 收集产物
         run: |
           mkdir -p dist
-          echo "=== 查找 .dol / .elf ==="
           find . -maxdepth 6 \( -name "*.dol" -o -name "*.elf" \) -exec ls -la {} \;
           find . -maxdepth 6 \( -name "*.dol" -o -name "*.elf" \) -exec cp -v {} dist/ \;
-          echo "=== 产物列表 ==="
           ls -la dist/
 
       - name: 上传编译产物
