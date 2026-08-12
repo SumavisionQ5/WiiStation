@@ -223,16 +223,14 @@ jobs:
           echo "=== base_rules 第 1~20 行 ==="
           sed -n '1,20p' /opt/devkitpro/devkitPPC/base_rules
 
-      - name: 构建
+      - name: 构建 WiiSXRX
         run: |
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
-          if [ -f Makefile ] || [ -f makefile ]; then BD=".";
-          elif [ -d pcsx_rearmed ] && [ -f pcsx_rearmed/Makefile ]; then BD="pcsx_rearmed";
-          else BD="pcsx_rearmed"; fi
-          echo "构建目录: $BD"
-          cd "$BD"
-          make -j$(nproc)
+          # 关键：显式提供 base_tools 缺失的静默控制变量
+          make -j$(nproc) \
+            SILENTMSG='@echo' \
+            SILENTCMD='@'
 
       - name: 收集产物
         run: |
