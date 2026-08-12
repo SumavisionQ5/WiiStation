@@ -212,23 +212,18 @@ jobs:
           echo "=== 测试管道到 as ==="
           /opt/devkitpro/tools/bin/bin2s -a 32 /etc/hostname | as -o /tmp/test.o && echo "✅ bin2s + as 链路正常" || echo "!! as 有问题"
 
-      - name: 构建 WiiSXRX（生成 .dol，含 Python 兜底）
+      # ↓↓↓ 关键改动 1：构建只跑 Wii_Release 目标，不编 debug 版 ↓↓↓
+      - name: 构建 WiiSXRX_Release（生成 .dol）
         run: |
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
 
-          # 0. 编译 elf2dol：强制字节序宏（跳过默认编译——默认版运行报 Bad address）
+          # 0. elf2dol 尝试编译（大概率运行失败，不用管，Python 兜底会接管）
           mkdir -p /opt/devkitpro/tools/bin
-          [ -d /tmp/gct ] || git clone --depth=1 https://github.com/devkitPro/gamecube-tools /tmp/gct
-          cd /tmp/gct/elftool
-          OK=""
-          for FLAG in "-DWORDS_BIGENDIAN" "-D_BYTE_ORDER=_BIG_ENDIAN" "-D__BIG_ENDIAN__"; do
-            echo "=== 尝试 $FLAG ==="
-            if gcc -O2 $FLAG -o elf2dol elf2dol.c 2>/dev/null; then OK="$FLAG"; break; fi
-          done
-          [ -n "$OK" ] && echo "✅ 宏编译成功: $OK" || { echo "⚠️ 宏编译全部失败，退回默认"; gcc -O2 -o elf2dol elf2dol.c; }
-          cp -v elf2dol /opt/devkitpro/tools/bin/
+          [ -d /tmp/gct ] || git clone --depth=1 https://github.com/devkitPro/gamecube-tools /tmp/gct 2>/dev/null || true
+          (cd /tmp/gct/elftool && gcc -O2 -o elf2dol elf2dol.c 2>/dev/null) || true
+          cp -v /tmp/gct/elftool/elf2dol /opt/devkitpro/tools/bin/ 2>/dev/null || true
           cd "$GITHUB_WORKSPACE"
 
           EXTRA="SILENTMSG=@echo SILENTCMD=@ \
@@ -244,8 +239,8 @@ jobs:
                 deps/libchdr/deps/zlib-1.3.1/zconf.h \
                 /opt/devkitpro/libogc2/include/ 2>/dev/null || true
 
-          # 2. 第一次 make（编库，链接失败预期）
-          make -j$(nproc) $EXTRA || echo "⚠️ 首次构建链接失败，属预期"
+          # 2. 第一次 make（只编 Wii_Release，链接失败预期）
+          make Wii_Release -j$(nproc) $EXTRA || echo "⚠️ 首次构建链接失败，属预期"
 
           # 3. 复制缺失库
           mkdir -p /opt/devkitpro/libogc2/lib/wii
@@ -254,10 +249,10 @@ jobs:
           cp -v deps/opengx/lib/libOpengx.a \
                 /opt/devkitpro/libogc2/lib/wii/libopengx.a
 
-          # 4. 第二次 make：链接 .elf；elf2dol 转换失败则忽略（.elf 已生成）
-          make -j$(nproc) $EXTRA || echo "⚠️ make 在 elf2dol 阶段失败，改用 Python 转换"
+          # 4. 第二次 make（只编 Wii_Release，.elf 已生成，elf2dol 失败忽略）
+          make Wii_Release -j$(nproc) $EXTRA || echo "⚠️ make 在 elf2dol 阶段失败，改用 Python 转换"
 
-          # 5. Python 兜底：确保所有 .elf 都有对应 .dol
+          # 5. Python 兜底：只转换 WiiSXRX_Release.elf → WiiSXRX_Release.dol
           echo "=== Python ELF→DOL 兜底转换 ==="
           python3 - << 'PYEOF'
           import struct, os
@@ -332,22 +327,24 @@ jobs:
                   f.write(out)
               print(f"✅ {dol_path} 生成成功 ({len(out)} 字节)")
 
-              for root, dirs, files in os.walk('.'):
-                  for fn in files:
-                      if fn.endswith('.elf'):
-                          elf = os.path.join(root, fn)
-                          dol = elf[:-4] + '.dol'
-                          try:
-                              conv(elf, dol)   # 强制转换，覆盖可能存在的残缺 .dol
-                          except Exception as e:
-                              print(f"⚠️ {elf}: {e}")
+          # ↓↓↓ 只处理 WiiSXRX_Release.elf，跳过 debug 版 ↓↓↓
+          for root, dirs, files in os.walk('.'):
+              for fn in files:
+                  if fn == 'WiiSXRX_Release.elf':
+                      elf = os.path.join(root, fn)
+                      dol = elf[:-4] + '.dol'
+                      try:
+                          conv(elf, dol)
+                      except Exception as e:
+                          print(f"⚠️ {elf}: {e}")
           PYEOF
 
+      # ↓↓↓ 关键改动 2：只收集 WiiSXRX_Release.dol ↓↓↓
       - name: 收集产物
         run: |
           mkdir -p dist
-          find . -maxdepth 6 \( -name "*.dol" -o -name "*.elf" \) -exec ls -la {} \;
-          find . -maxdepth 6 \( -name "*.dol" -o -name "*.elf" \) -exec cp -v {} dist/ \;
+          find . -name "WiiSXRX_Release.dol" -exec ls -la {} \;
+          find . -name "WiiSXRX_Release.dol" -exec cp -v {} dist/ \;
           ls -la dist/
 
       - name: 上传编译产物
