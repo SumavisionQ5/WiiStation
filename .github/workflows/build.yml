@@ -1,0 +1,115 @@
+name: Build WiiSXRX_2022
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master, main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04          # 用干净 Ubuntu，因为要装指定旧版 devkitPPC
+      options: --user root
+
+    steps:
+      - name: 检出源码（含子模块）
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: 探查项目结构（调试用）
+        run: |
+          echo "=== 根目录 ==="
+          ls -la
+          echo "=== 查找构建文件 ==="
+          find . -maxdepth 3 \( -name "Makefile" -o -name "CMakeLists.txt" -o -name "*.sh" \) | head -30
+          echo "=== pcsx_rearmed 目录 ==="
+          ls pcsx_rearmed/ 2>/dev/null | head -20 || echo "(无 pcsx_rearmed 目录)"
+
+      - name: 安装基础工具
+        run: |
+          apt-get update
+          apt-get install -y wget curl ca-certificates zstd unzip bzip2 xz-utils make gcc g++ git file
+
+      - name: 下载并安装 devkitPPC r41-2
+        run: |
+          set -e
+          # r41 目录（leseratte10 旧版镜像站）[1][2]
+          DEVPAGE="https://wii.leseratte10.de/devkitPro/devkitPPC/r41%20%282022-05-31%29/"
+          echo "=== 列出 r41 目录中的 devkitPPC 包 ==="
+          wget -qO- "$DEVPAGE" | grep -oE 'href="[^"]*"' | grep -E "devkitPPC-r41" || true
+          # 自动解析 r41-2 linux_x86_64 包名
+          FILE=$(wget -qO- "$DEVPAGE" | grep -oE 'devkitPPC-r41-2[^"<]*linux_x86_64[^"<]*\.pkg\.tar\.zst' | head -1)
+          echo "解析到文件: $FILE"
+          wget -q "${DEVPAGE}${FILE}" -O devkitPPC.pkg.tar.zst
+          ls -la devkitPPC.pkg.tar.zst
+
+          mkdir -p /tmp/dkp /opt/devkitpro
+          tar --zstd -xf devkitPPC.pkg.tar.zst -C /tmp/dkp
+          echo "=== pacman 包内部结构 ==="
+          find /tmp/dkp -maxdepth 4 -type d | head -30
+          # 把内容合并到 /opt/devkitpro
+          cp -r /tmp/dkp/opt/devkitpro/* /opt/devkitpro/ 2>/dev/null || \
+          cp -r /tmp/dkp/usr/* /opt/devkitpro/ 2>/dev/null || true
+          echo "=== /opt/devkitpro ==="
+          ls /opt/devkitpro
+
+      - name: 下载并安装作者的预编译库（libogc2 + Lightning + Lightrec）
+        run: |
+          set -e
+          # 文件名里有 + 号，URL 编码两种写法都试
+          wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec%2BLibogc2.zip" -O libs.zip || \
+          wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec+Libogc2.zip" -O libs.zip
+          ls -la libs.zip
+          mkdir -p /tmp/libs
+          unzip -o libs.zip -d /tmp/libs
+          echo "=== zip 内容结构 ==="
+          find /tmp/libs -maxdepth 3 | head -50
+          # 合并到 devkitPro 目录
+          cp -r /tmp/libs/* /opt/devkitpro/ 2>/dev/null || true
+
+      - name: 安装作者的 libSDL.a
+        run: |
+          mkdir -p /opt/devkitpro/portlibs/wii/lib /opt/devkitpro/portlibs/ppc/lib
+          wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/libSDL.a" -O /opt/devkitpro/portlibs/wii/lib/libSDL.a
+          ls -la /opt/devkitpro/portlibs/wii/lib/libSDL.a
+
+      - name: 设置环境变量并验证工具链
+        run: |
+          echo "DEVKITPRO=/opt/devkitpro" >> $GITHUB_ENV
+          echo "DEVKITPPC=/opt/devkitpro/devkitPPC" >> $GITHUB_ENV
+          export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
+          echo "=== 编译器版本 ==="
+          powerpc-eabi-gcc --version | head -1
+          echo "=== 关键文件 ==="
+          find /opt/devkitpro -name "base_rules" 2>/dev/null | head
+          find /opt/devkitpro -name "liblightrec*" 2>/dev/null | head
+          find /opt/devkitpro -name "liblightning*" 2>/dev/null | head
+
+      - name: 构建
+        run: |
+          set -e
+          export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
+          # 自动定位构建目录
+          if [ -f Makefile ] || [ -f makefile ]; then BD=".";
+          elif [ -d pcsx_rearmed ] && [ -f pcsx_rearmed/Makefile ]; then BD="pcsx_rearmed";
+          else BD="pcsx_rearmed"; fi
+          echo "构建目录: $BD"
+          cd "$BD"
+          make -j$(nproc)
+
+      - name: 收集产物
+        run: |
+          mkdir -p dist
+          echo "=== 查找 .dol / .elf ==="
+          find . -maxdepth 6 \( -name "*.dol" -o -name "*.elf" \) -exec ls -la {} \;
+          find . -maxdepth 6 \( -name "*.dol" -o -name "*.elf" \) -exec cp -v {} dist/ \;
+          echo "=== 产物列表 ==="
+          ls -la dist/
+
+      - name: 上传编译产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: WiiSXRX-${{ github.sha }}
+          path: dist/
