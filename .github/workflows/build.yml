@@ -227,30 +227,34 @@ jobs:
         run: |
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
+          EXTRA="SILENTMSG=@echo SILENTCMD=@ \
+            CC=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-gcc \
+            CXX=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++ \
+            AS=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-as \
+            LD=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++ \
+            AR=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-ar"
 
-          # 1. 补充 zlib 头文件
+          # 1. 先补 zlib 头文件（源码自带，直接复制）
           mkdir -p /opt/devkitpro/libogc2/include
           cp -v deps/libchdr/deps/zlib-1.3.1/zlib.h \
                 deps/libchdr/deps/zlib-1.3.1/zconf.h \
                 /opt/devkitpro/libogc2/include/ 2>/dev/null || true
 
-          # 2. 重命名并安装 libz.a（zlib 静态库）
+          # 2. 第一次构建：编译所有依赖库（链接阶段缺 -lz/-lopengx 会失败，属预期）
+          echo "=== 第一次构建（生成依赖库）==="
+          make -j$(nproc) $EXTRA || echo "⚠️ 首次构建在链接阶段失败，属预期（库已生成）"
+
+          # 3. 复制缺失的库（现在产物已存在）
+          echo "=== 复制缺失库 ==="
           mkdir -p /opt/devkitpro/libogc2/lib/wii
           cp -v deps/libchdr/deps/zlib-1.3.1/bin/lib/libzlibstatic.a \
                 /opt/devkitpro/libogc2/lib/wii/libz.a
-
-          # 3. 重命名并安装 libopengx.a（注意大小写：链接找小写 opengx）
           cp -v deps/opengx/lib/libOpengx.a \
                 /opt/devkitpro/libogc2/lib/wii/libopengx.a
 
-          make -j$(nproc) \
-            SILENTMSG='@echo' \
-            SILENTCMD='@' \
-            CC=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-gcc \
-            CXX=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++ \
-            AS=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-as \
-            LD=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++ \
-            AR=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-ar
+          # 4. 第二次构建：库都齐了，这次应能链接成功
+          echo "=== 第二次构建（完整）==="
+          make -j$(nproc) $EXTRA
 
       - name: 收集产物
         run: |
