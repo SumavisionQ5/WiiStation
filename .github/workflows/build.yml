@@ -63,6 +63,11 @@ jobs:
           cp -r /tmp/dkp/usr/* /opt/devkitpro/ 2>/dev/null || true
           echo "=== /opt/devkitpro ==="
           ls /opt/devkitpro
+          # 关键诊断：确认 base_tools 是否在 r41-2 包里
+          echo "=== r41-2 包内所有含 base_tools/base_rules/wii_rules 的文件 ==="
+          tar -tf devkitPPC.pkg.tar.xz | grep -iE "base_tools|base_rules|wii_rules|gamecube_rules" || echo "(包内没有这些文件)"
+          echo "=== 解压目录里查找 ==="
+          find /tmp/dkp -name "base_tools" -o -name "base_rules" 2>/dev/null
 
       - name: 下载并安装作者的预编译库（libogc2 + Lightning + Lightrec + 修改版 rules）
         run: |
