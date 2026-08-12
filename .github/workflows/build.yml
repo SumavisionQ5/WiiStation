@@ -127,38 +127,43 @@ jobs:
           wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/libSDL.a" -O /opt/devkitpro/portlibs/wii/lib/libSDL.a
           ls -la /opt/devkitpro/portlibs/wii/lib/libSDL.a
 
-      - name: 从 buildscripts 历史包提取 base_tools
+      - name: 从 buildscripts 历史包提取 base_tools（PPC 版）
         run: |
           set -e
-          echo "=== 列出所有 buildscripts 历史包 ==="
-          wget -qO- "https://wii.leseratte10.de/devkitPro/buildscripts/" \
-            | grep -oE 'buildscripts-[0-9]+\.tar\.(gz|bz2)' | sort -u
-
-          # 下载 2020 年那个已知存在的包（含规则文件）
-          wget -q "https://wii.leseratte10.de/devkitPro/buildscripts/buildscripts-20200412.tar.bz2" \
-            -O /tmp/bs.tar.bz2
-          ls -la /tmp/bs.tar.bz2
-          mkdir -p /tmp/bs
+          # 下载包并解压（已下载过可跳过）
+          [ -f /tmp/bs.tar.bz2 ] || wget -q "https://wii.leseratte10.de/devkitPro/buildscripts/buildscripts-20200412.tar.bz2" -O /tmp/bs.tar.bz2
+          rm -rf /tmp/bs && mkdir -p /tmp/bs
           tar -xjf /tmp/bs.tar.bz2 -C /tmp/bs
 
-          echo "=== 包内查找 base_tools / base_rules ==="
-          find /tmp/bs -name "base_tools" -o -name "base_rules" 2>/dev/null
+          echo "=== 包内所有 base_tools 位置 ==="
+          find /tmp/bs -name "base_tools" -exec echo "{}" \;
 
-          echo "=== 复制 base_tools 到正确位置 ==="
-          mkdir -p /opt/devkitpro/devkitPPC
-          BASE_TOOLS=$(find /tmp/bs -name "base_tools" | head -1)
-          if [ -n "$BASE_TOOLS" ]; then
-            cp -v "$BASE_TOOLS" /opt/devkitpro/devkitPPC/base_tools
+          echo "=== 所有 base_tools 内容预览（前几行）==="
+          for f in $(find /tmp/bs -name "base_tools"); do
+            echo "----- $f -----"
+            grep -E "^(PREFIX|export PREFIX|SILENTMSG|SILENTCMD|CC|CXX|LD|AR|BIN2S|ELF2DOL)" "$f" | head -10
+          done
+
+          # 优先选择 devkitPPC 相关的 base_tools
+          PPC_TOOLS=$(find /tmp/bs -path "*devkitPPC*" -name "base_tools" | head -1)
+          if [ -n "$PPC_TOOLS" ]; then
+            echo "=== 使用 PPC 版: $PPC_TOOLS ==="
+            cp -v "$PPC_TOOLS" /opt/devkitpro/devkitPPC/base_tools
           else
-            echo "!! 未找到 base_tools，列出包内容供分析"
-            find /tmp/bs -maxdepth 3 -type d | head -40
-            exit 1
+            echo "!! 没有 PPC 专属 base_tools，将使用全能版并手动补全"
+            # 使用第一个版本，后续手动补全
+            FIRST=$(find /tmp/bs -name "base_tools" | head -1)
+            cp -v "$FIRST" /opt/devkitpro/devkitPPC/base_tools
+            # 补全 SILENTMSG/SILENTCMD 和 PREFIX
+            cat >> /opt/devkitpro/devkitPPC/base_tools << 'EOF'
+export PREFIX	:=	$(DEVKITPPC)/bin/powerpc-eabi-
+export SILENTMSG	?=	@echo
+export SILENTCMD	?=	@
+EOF
           fi
 
-          echo "=== 验证 base_tools 内容 ==="
-          wc -c /opt/devkitpro/devkitPPC/base_tools
-          grep -E "SILENTMSG|SILENTCMD|export CXX|export CC|export AR|ERROR_FILTER|BIN2S|ELF2DOL" \
-            /opt/devkitpro/devkitPPC/base_tools | head -10
+          echo "=== 最终 base_tools 内容 ==="
+          cat /opt/devkitpro/devkitPPC/base_tools
 
       - name: 设置环境变量并验证工具链
         run: |
