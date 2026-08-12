@@ -69,10 +69,8 @@ jobs:
           wget -q "https://wii.leseratte10.de/devkitPro/buildscripts/buildscripts-20200412.tar.bz2" \
             -O /tmp/bs.tar.bz2
           mkdir -p /tmp/bs && tar -xjf /tmp/bs.tar.bz2 -C /tmp/bs
-          # 用任意版 base_tools（dka64 的也无妨，补全 PPC 变量）
           FIRST=$(find /tmp/bs -name "base_tools" | head -1)
           cp -v "$FIRST" /opt/devkitpro/devkitPPC/base_tools
-          # 补全 PPC 关键变量
           echo 'export PREFIX := $(DEVKITPPC)/bin/powerpc-eabi-' >> /opt/devkitpro/devkitPPC/base_tools
           echo 'export SILENTMSG ?= @echo' >> /opt/devkitpro/devkitPPC/base_tools
           echo 'export SILENTCMD ?= @' >> /opt/devkitpro/devkitPPC/base_tools
@@ -86,27 +84,27 @@ jobs:
             ln -sf /opt/devkitpro/devkitPPC/bin/powerpc-eabi-as /opt/devkitpro/devkitPPC/bin/as
           fi
           cat > /opt/devkitpro/tools/bin/bin2s << 'EOF'
-#!/bin/bash
-ALIGN=4
-FILE=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -a) ALIGN="$2"; shift 2;;
-    *)  FILE="$1"; shift;;
-  esac
-done
-[ -n "$FILE" ] || { echo "usage: bin2s [-a align] file" >&2; exit 1; }
-NAME=$(basename "$FILE" | sed 's/^\([0-9]\)/_\1/' | sed 's/[^A-Za-z0-9_]/_/g')
-echo ".section .rodata"
-echo ".align $ALIGN"
-echo ".global $NAME"
-echo "$NAME:"
-echo ".incbin \"$FILE\""
-echo ".global ${NAME}_end"
-echo "${NAME}_end:"
-echo ".global ${NAME}_size"
-echo ".set ${NAME}_size, ${NAME}_end - ${NAME}"
-EOF
+          #!/bin/bash
+          ALIGN=4
+          FILE=""
+          while [ $# -gt 0 ]; do
+            case "$1" in
+              -a) ALIGN="$2"; shift 2;;
+              *)  FILE="$1"; shift;;
+            esac
+          done
+          [ -n "$FILE" ] || { echo "usage: bin2s [-a align] file" >&2; exit 1; }
+          NAME=$(basename "$FILE" | sed 's/^\([0-9]\)/_\1/' | sed 's/[^A-Za-z0-9_]/_/g')
+          echo ".section .rodata"
+          echo ".align $ALIGN"
+          echo ".global $NAME"
+          echo "$NAME:"
+          echo ".incbin \"$FILE\""
+          echo ".global ${NAME}_end"
+          echo "${NAME}_end:"
+          echo ".global ${NAME}_size"
+          echo ".set ${NAME}_size, ${NAME}_end - ${NAME}"
+          EOF
           chmod +x /opt/devkitpro/tools/bin/bin2s
 
       - name: 构建 WiiSXRX_Release（生成 .dol）
@@ -115,7 +113,6 @@ EOF
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
 
-          # 传入关键变量（base_tools 补全后可按原版 make，这里保留保险）
           EXTRA="SILENTMSG=@echo SILENTCMD=@ \
             CC=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-gcc \
             CXX=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++ \
@@ -142,7 +139,7 @@ EOF
           # 4. 第二次 make（链接并生成 .dol）
           make Wii_Release -j$(nproc) $EXTRA || echo "elf2dol 失败，由 Python 兜底"
 
-          # 5. Python ELF→DOL 转换（若 .dol 已正常生成则跳过）
+          # 5. Python ELF→DOL 转换
           python3 - << 'PYEOF'
           import struct, os, sys
 
@@ -209,7 +206,6 @@ EOF
                   if fn == 'WiiSXRX_Release.elf':
                       elf = os.path.join(root, fn)
                       dol = elf[:-4] + '.dol'
-                      # 若已存在且大小合理则跳过
                       if os.path.exists(dol):
                           sz = os.path.getsize(dol)
                           if 1048576 <= sz <= 314572800:
