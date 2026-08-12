@@ -110,6 +110,8 @@ jobs:
       - name: 构建 WiiSXRX_Release（生成 .dol）
         run: |
           set -e
+          export DEVKITPRO=/opt/devkitpro
+          export DEVKITPPC=/opt/devkitpro/devkitPPC
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
 
