@@ -17,13 +17,13 @@ jobs:
 
     steps:
       # ↓↓↓ 关键：先装 git，checkout 才能用本地 git 模式（支持子模块）↓↓↓
-      - name: 安装基础工具（含 git，checkout 必需）
+      - name: 安装基础工具（含 git、python3，checkout 必需）
         run: |
           apt-get update
           apt-get install -y \
             git ca-certificates \
             wget curl zstd unzip bzip2 xz-utils \
-            make gcc g++ file
+            make gcc g++ file python3
 
       - name: 检出源码（含子模块）
         uses: actions/checkout@v4
@@ -332,17 +332,15 @@ jobs:
                   f.write(out)
               print(f"✅ {dol_path} 生成成功 ({len(out)} 字节)")
 
-          for root, dirs, files in os.walk('.'):
-              for fn in files:
-                  if fn.endswith('.elf'):
-                      elf = os.path.join(root, fn)
-                      dol = elf[:-4] + '.dol'
-                      if os.path.exists(dol) and os.path.getsize(dol) > 0x100:
-                          continue
-                      try:
-                          conv(elf, dol)
-                      except Exception as e:
-                          print(f"⚠️ {elf}: {e}")
+              for root, dirs, files in os.walk('.'):
+                  for fn in files:
+                      if fn.endswith('.elf'):
+                          elf = os.path.join(root, fn)
+                          dol = elf[:-4] + '.dol'
+                          try:
+                              conv(elf, dol)   # 强制转换，覆盖可能存在的残缺 .dol
+                          except Exception as e:
+                              print(f"⚠️ {elf}: {e}")
           PYEOF
 
       - name: 收集产物
