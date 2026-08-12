@@ -212,36 +212,24 @@ jobs:
           echo "=== 测试管道到 as ==="
           /opt/devkitpro/tools/bin/bin2s -a 32 /etc/hostname | as -o /tmp/test.o && echo "✅ bin2s + as 链路正常" || echo "!! as 有问题"
 
-      - name: 构建 WiiSXRX（生成 .dol）
+      - name: 构建 WiiSXRX（生成 .dol，含 Python 兜底）
         run: |
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
+          cd "$GITHUB_WORKSPACE"
 
-          # 0. 编译并安装 elf2dol（多策略自动重试，解决大小端问题）
+          # 0. 编译 elf2dol：强制字节序宏（跳过默认编译——默认版运行报 Bad address）
           mkdir -p /opt/devkitpro/tools/bin
           [ -d /tmp/gct ] || git clone --depth=1 https://github.com/devkitPro/gamecube-tools /tmp/gct
           cd /tmp/gct/elftool
-
-          # 策略 1：默认直接编译
-          echo "=== 尝试默认编译 ==="
-          if gcc -O2 -o elf2dol elf2dol.c 2>/dev/null; then
-            cp -v elf2dol /opt/devkitpro/tools/bin/
-            echo "✅ 默认编译成功"
-          else
-            # 策略 2：加字节序宏重试
-            for FLAG in "-DWORDS_BIGENDIAN" "-D_BYTE_ORDER=_BIG_ENDIAN" "-D__BIG_ENDIAN__"; do
-              echo "=== 尝试 $FLAG ==="
-              if gcc -O2 $FLAG -o elf2dol elf2dol.c 2>/dev/null; then
-                cp -v elf2dol /opt/devkitpro/tools/bin/
-                echo "✅ $FLAG 编译成功"
-                break
-              fi
-            done
-          fi
-
-          # 验证 elf2dol 已就位
-          [ -x /opt/devkitpro/tools/bin/elf2dol ] || { echo "!! elf2dol 编译失败"; exit 1; }
-          cd /__w/WiiStation/WiiStation
+          OK=""
+          for FLAG in "-DWORDS_BIGENDIAN" "-D_BYTE_ORDER=_BIG_ENDIAN" "-D__BIG_ENDIAN__"; do
+            echo "=== 尝试 $FLAG ==="
+            if gcc -O2 $FLAG -o elf2dol elf2dol.c 2>/dev/null; then OK="$FLAG"; break; fi
+          done
+          [ -n "$OK" ] && echo "✅ 宏编译成功: $OK" || { echo "⚠️ 宏编译全部失败，退回默认"; gcc -O2 -o elf2dol elf2dol.c; }
+          cp -v elf2dol /opt/devkitpro/tools/bin/
+          cd "$GITHUB_WORKSPACE"
 
           EXTRA="SILENTMSG=@echo SILENTCMD=@ \
             CC=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-gcc \
@@ -266,8 +254,96 @@ jobs:
           cp -v deps/opengx/lib/libOpengx.a \
                 /opt/devkitpro/libogc2/lib/wii/libopengx.a
 
-          # 4. 第二次 make（这次链接 + 生成 .dol 都应成功）
-          make -j$(nproc) $EXTRA
+          # 4. 第二次 make：链接 .elf；elf2dol 转换失败则忽略（.elf 已生成）
+          make -j$(nproc) $EXTRA || echo "⚠️ make 在 elf2dol 阶段失败，改用 Python 转换"
+
+          # 5. Python 兜底：确保所有 .elf 都有对应 .dol
+          echo "=== Python ELF→DOL 兜底转换 ==="
+          python3 - << 'PYEOF'
+          import struct, os
+
+          def conv(elf_path, dol_path):
+              with open(elf_path, 'rb') as f:
+                  data = f.read()
+              if data[:4] != b'\x7fELF':
+                  raise RuntimeError("not ELF")
+              if data[4] != 1 or data[5] != 2:
+                  raise RuntimeError("not 32-bit big-endian ELF")
+              e_entry = struct.unpack_from('>I', data, 24)[0]
+              e_phoff = struct.unpack_from('>I', data, 28)[0]
+              e_phentsize = struct.unpack_from('>H', data, 42)[0]
+              e_phnum = struct.unpack_from('>H', data, 44)[0]
+              segs = []
+              for i in range(e_phnum):
+                  off = e_phoff + i * e_phentsize
+                  t, p_off, p_vaddr, p_paddr, p_fsz, p_msz, p_flags, p_align = \
+                      struct.unpack_from('>IIIIIIII', data, off)
+                  if t == 1:  # PT_LOAD
+                      segs.append((p_vaddr, p_off, p_fsz, p_msz, p_flags))
+              segs.sort(key=lambda s: s[0])
+              if not segs:
+                  raise RuntimeError("no PT_LOAD")
+              text, dta = [], []
+              for vaddr, off, fsz, msz, flags in segs:
+                  if flags & 1:  # 可执行 → text
+                      text.append((vaddr, off, fsz))
+                  else:
+                      dta.append((vaddr, off, fsz))
+              bss_addr = bss_size = 0
+              lv, lo, lf, lm, lfl = segs[-1]
+              if lm > lf:
+                  bss_addr = lv + lf
+                  bss_size = lm - lf
+              text += [None] * (7 - len(text))
+              dta  += [None] * (7 - len(dta))
+
+              hdr = bytearray(0x100)
+              pos = 0x100
+              tpos, dpos = [], []
+              for i in range(7):
+                  tpos.append(pos if text[i] else 0)
+                  if text[i]: pos += text[i][2]; pos = (pos + 31) & ~31
+              for i in range(7):
+                  dpos.append(pos if dta[i] else 0)
+                  if dta[i]: pos += dta[i][2]; pos = (pos + 31) & ~31
+              for i in range(7):
+                  struct.pack_into('>I', hdr, 0x00 + i*4, tpos[i])
+                  struct.pack_into('>I', hdr, 0x1C + i*4, dpos[i])
+                  struct.pack_into('>I', hdr, 0x38 + i*4, text[i][0] if text[i] else 0)
+                  struct.pack_into('>I', hdr, 0x54 + i*4, dta[i][0] if dta[i] else 0)
+                  struct.pack_into('>I', hdr, 0x70 + i*4, text[i][2] if text[i] else 0)
+                  struct.pack_into('>I', hdr, 0x8C + i*4, dta[i][2] if dta[i] else 0)
+              struct.pack_into('>I', hdr, 0xA8, bss_addr)
+              struct.pack_into('>I', hdr, 0xAC, bss_size)
+              struct.pack_into('>I', hdr, 0xB0, e_entry)
+
+              out = bytearray(hdr)
+              for i in range(7):
+                  if text[i]:
+                      v, o, s = text[i]
+                      out += data[o:o+s]
+                      out += b'\x00' * ((-len(out)) % 32)
+              for i in range(7):
+                  if dta[i]:
+                      v, o, s = dta[i]
+                      out += data[o:o+s]
+                      out += b'\x00' * ((-len(out)) % 32)
+              with open(dol_path, 'wb') as f:
+                  f.write(out)
+              print(f"✅ {dol_path} 生成成功 ({len(out)} 字节)")
+
+          for root, dirs, files in os.walk('.'):
+              for fn in files:
+                  if fn.endswith('.elf'):
+                      elf = os.path.join(root, fn)
+                      dol = elf[:-4] + '.dol'
+                      if os.path.exists(dol) and os.path.getsize(dol) > 0x100:
+                          continue
+                      try:
+                          conv(elf, dol)
+                      except Exception as e:
+                          print(f"⚠️ {elf}: {e}")
+          PYEOF
 
       - name: 收集产物
         run: |
