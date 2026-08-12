@@ -16,8 +16,7 @@ jobs:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
     steps:
-      # ↓↓↓ 关键：先装 git，checkout 才能用本地 git 模式（支持子模块）↓↓↓
-      - name: 安装基础工具（含 git、python3，checkout 必需）
+      - name: 安装基础工具
         run: |
           apt-get update
           apt-get install -y \
@@ -25,241 +24,98 @@ jobs:
             wget curl zstd unzip bzip2 xz-utils \
             make gcc g++ file python3
 
-      - name: 检出源码（含子模块）
+      - name: 检出源码（不拉子模块，依赖已内嵌）
         uses: actions/checkout@v4
         with:
-          submodules: recursive   # 若报 .gitmodules 错误，改成 false
+          submodules: false
 
-      - name: 探查项目结构（调试用）
-        run: |
-          echo "=== 根目录 ==="
-          ls -la
-          echo "=== 查找构建文件 ==="
-          find . -maxdepth 3 \( -name "Makefile" -o -name "CMakeLists.txt" -o -name "*.sh" \) | head -30
-          echo "=== pcsx_rearmed 目录 ==="
-          ls pcsx_rearmed/ 2>/dev/null | head -20 || echo "(无 pcsx_rearmed 目录)"
-
-      - name: 下载并安装 devkitPPC r41-2
+      - name: 安装 devkitPPC r41-2
         run: |
           set -e
           DEVPAGE="https://wii.leseratte10.de/devkitPro/devkitPPC/r41%20%282022-05-31%29/"
-          echo "=== 列出 r41 目录中的 devkitPPC 包 ==="
-          wget -qO- "$DEVPAGE" | grep -oE 'devkitPPC-r41-2[^"<]*linux_x86_64[^"<]*\.pkg\.tar\.(xz|zst)' || true
-          # 优先匹配 .xz（实际文件名），.zst 作备选
-          FILE=$(wget -qO- "$DEVPAGE" | grep -oE 'devkitPPC-r41-2[^"<]*linux_x86_64[^"<]*\.pkg\.tar\.(xz|zst)' | head -1)
-          echo "解析到文件: $FILE"
+          FILE=$(wget -qO- "$DEVPAGE" | grep -oE 'devkitPPC-r41-2[^"<]*linux_x86_64[^"<]*\.pkg\.tar\.xz' | head -1)
           [ -n "$FILE" ] || { echo "!! 文件名解析失败"; exit 1; }
-
           wget -q "${DEVPAGE}${FILE}"
-          ls -la "$FILE"
-
           mkdir -p /tmp/dkp /opt/devkitpro
-          # GNU tar 能自动识别 xz / zst 压缩格式，无需手动指定
           tar -xf "$FILE" -C /tmp/dkp
-          echo "=== pacman 包内部结构 ==="
-          find /tmp/dkp -maxdepth 4 -type d | head -30
-          # 关键诊断：确认 base_tools 是否在 r41-2 包里
-          echo "=== r41-2 包内所有含 base_tools/base_rules/wii_rules 的文件 ==="
-          tar -tf devkitPPC.pkg.tar.xz | grep -iE "base_tools|base_rules|wii_rules|gamecube_rules" || echo "(包内没有这些文件)"
-          echo "=== 解压目录里查找 ==="
-          find /tmp/dkp -name "base_tools" -o -name "base_rules" 2>/dev/null
-          # 把内容合并到 /opt/devkitpro
           cp -r /tmp/dkp/opt/devkitpro/* /opt/devkitpro/ 2>/dev/null || \
           cp -r /tmp/dkp/usr/* /opt/devkitpro/ 2>/dev/null || true
-          echo "=== /opt/devkitpro ==="
-          ls /opt/devkitpro
 
-      - name: 下载并安装作者的预编译库（libogc2 + Lightning + Lightrec + 修改版 rules）
+      - name: 安装作者的预编译库（libogc2 + Lightning + Lightrec + 修改版 rules）
         run: |
           set -e
           for URL in \
             "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec%2BLibogc2.zip" \
             "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec+Libogc2.zip"; do
-            echo "尝试下载: $URL"
             wget -q "$URL" -O libs.zip && break
           done
-          file libs.zip
-          unzip -t libs.zip | tail -3 || { echo "!! zip 校验失败"; exit 1; }
-
-          rm -rf /tmp/libs
-          mkdir -p /tmp/libs
+          rm -rf /tmp/libs && mkdir -p /tmp/libs
           unzip -o libs.zip -d /tmp/libs
-
-          # 定位内容根目录（lightrec+Libogc2/）
           TOP_DIR=$(find /tmp/libs -maxdepth 2 -type d -name "devkitPPC" -printf "%h\n" | head -1)
-          echo "zip 实际内容根目录: $TOP_DIR"
-          [ -n "$TOP_DIR" ] || { echo "!! 找不到 devkitPPC 目录"; exit 1; }
-
-          echo "=== 合并到 /opt/devkitpro ==="
+          [ -n "$TOP_DIR" ] || { echo "!! zip 结构异常"; exit 1; }
           cp -r "$TOP_DIR"/* /opt/devkitpro/
-
-          # ↓↓↓ 关键修复：把 libogc2/wii_rules 复制到 devkitPPC/wii_rules（项目 Makefile 硬编码引用这个路径）↓↓↓
-          echo "=== 复制 libogc2/wii_rules → devkitPPC/wii_rules ==="
-          if [ -f /opt/devkitpro/libogc2/wii_rules ]; then
-            cp -v /opt/devkitpro/libogc2/wii_rules /opt/devkitpro/devkitPPC/wii_rules
-          else
-            echo "!! libogc2/wii_rules 不存在，请检查 zip 结构"
-            exit 1
-          fi
-
-          echo "=== 验证关键文件 ==="
-          ls -la /opt/devkitpro/devkitPPC/base_rules /opt/devkitpro/devkitPPC/wii_rules /opt/devkitpro/libogc2/wii_rules
-
-      - name: 确保 wii_rules 就位（构建前保障）
-        run: |
-          set -e
-          if [ ! -f /opt/devkitpro/devkitPPC/wii_rules ]; then
-            echo "!! /opt/devkitpro/devkitPPC/wii_rules 缺失，尝试从 zip 残留或标准位置恢复..."
-            find /opt/devkitpro /tmp/libs -name "wii_rules" 2>/dev/null \
-              -exec cp {} /opt/devkitpro/devkitPPC/wii_rules \; 2>/dev/null || true
-          fi
-          if [ -f /opt/devkitpro/devkitPPC/wii_rules ]; then
-            echo "✅ wii_rules 就位:"
-            ls -la /opt/devkitpro/devkitPPC/wii_rules
-          else
-            echo "!! 仍然没有 wii_rules，构建会失败，请查看上方 zip 结构日志"
-            exit 1
-          fi
+          # 复制 wii_rules 到 devkitPPC（Makefile 硬编码引用）
+          cp -v /opt/devkitpro/libogc2/wii_rules /opt/devkitpro/devkitPPC/wii_rules
 
       - name: 安装作者的 libSDL.a
         run: |
-          mkdir -p /opt/devkitpro/portlibs/wii/lib /opt/devkitpro/portlibs/ppc/lib
-          wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/libSDL.a" -O /opt/devkitpro/portlibs/wii/lib/libSDL.a
-          ls -la /opt/devkitpro/portlibs/wii/lib/libSDL.a
+          mkdir -p /opt/devkitpro/portlibs/wii/lib
+          wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/libSDL.a" \
+            -O /opt/devkitpro/portlibs/wii/lib/libSDL.a
 
-      - name: 从 buildscripts 历史包提取 base_tools（PPC 版）
+      - name: 提取并补全 base_tools
         run: |
           set -e
-          # 下载包并解压（已下载过可跳过）
-          [ -f /tmp/bs.tar.bz2 ] || wget -q "https://wii.leseratte10.de/devkitPro/buildscripts/buildscripts-20200412.tar.bz2" -O /tmp/bs.tar.bz2
-          rm -rf /tmp/bs && mkdir -p /tmp/bs
-          tar -xjf /tmp/bs.tar.bz2 -C /tmp/bs
+          wget -q "https://wii.leseratte10.de/devkitPro/buildscripts/buildscripts-20200412.tar.bz2" \
+            -O /tmp/bs.tar.bz2
+          mkdir -p /tmp/bs && tar -xjf /tmp/bs.tar.bz2 -C /tmp/bs
+          # 用任意版 base_tools（dka64 的也无妨，补全 PPC 变量）
+          FIRST=$(find /tmp/bs -name "base_tools" | head -1)
+          cp -v "$FIRST" /opt/devkitpro/devkitPPC/base_tools
+          # 补全 PPC 关键变量
+          echo 'export PREFIX := $(DEVKITPPC)/bin/powerpc-eabi-' >> /opt/devkitpro/devkitPPC/base_tools
+          echo 'export SILENTMSG ?= @echo' >> /opt/devkitpro/devkitPPC/base_tools
+          echo 'export SILENTCMD ?= @' >> /opt/devkitpro/devkitPPC/base_tools
 
-          echo "=== 包内所有 base_tools 位置 ==="
-          find /tmp/bs -name "base_tools" -exec echo "{}" \;
-
-          echo "=== 所有 base_tools 内容预览（前几行）==="
-          for f in $(find /tmp/bs -name "base_tools"); do
-            echo "----- $f -----"
-            grep -E "^(PREFIX|export PREFIX|SILENTMSG|SILENTCMD|CC|CXX|LD|AR|BIN2S|ELF2DOL)" "$f" | head -10
-          done
-
-          # 优先选择 devkitPPC 相关的 base_tools
-          PPC_TOOLS=$(find /tmp/bs -path "*devkitPPC*" -name "base_tools" | head -1)
-          if [ -n "$PPC_TOOLS" ]; then
-            echo "=== 使用 PPC 版: $PPC_TOOLS ==="
-            cp -v "$PPC_TOOLS" /opt/devkitpro/devkitPPC/base_tools
-          else
-            echo "!! 没有 PPC 专属 base_tools，将使用全能版并手动补全"
-            # 使用第一个版本，后续手动补全
-            FIRST=$(find /tmp/bs -name "base_tools" | head -1)
-            cp -v "$FIRST" /opt/devkitpro/devkitPPC/base_tools
-            # 补全 SILENTMSG/SILENTCMD 和 PREFIX
-            cat >> /opt/devkitpro/devkitPPC/base_tools << 'EOF'
-export PREFIX	:=	$(DEVKITPPC)/bin/powerpc-eabi-
-export SILENTMSG	?=	@echo
-export SILENTCMD	?=	@
-EOF
-          fi
-
-          echo "=== 最终 base_tools 内容 ==="
-          cat /opt/devkitpro/devkitPPC/base_tools
-
-      - name: 设置环境变量并验证工具链
-        run: |
-          echo "DEVKITPRO=/opt/devkitpro" >> $GITHUB_ENV
-          echo "DEVKITPPC=/opt/devkitpro/devkitPPC" >> $GITHUB_ENV
-          export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
-          echo "=== 编译器版本 ==="
-          powerpc-eabi-gcc --version | head -1
-          echo "=== 关键文件 ==="
-          find /opt/devkitpro -name "base_rules" 2>/dev/null | head
-          find /opt/devkitpro -name "liblightrec*" 2>/dev/null | head
-          find /opt/devkitpro -name "liblightning*" 2>/dev/null | head
-
-      - name: 安装 devkitPro tools（bin2s）
-        run: |
-          set -e
-          export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
-
-          echo "=== 1. 探查 leseratte10 镜像站结构 ==="
-          wget -qO- "https://wii.leseratte10.de/devkitPro/" | grep -oE 'href="[^"]*"' | head -60
-          echo "=== 2. 检查是否有 tools 相关目录/包 ==="
-          wget -qO- "https://wii.leseratte10.de/devkitPro/" | grep -iE 'tool|bin2s' || echo "(未直接看到 tools)"
-
-          echo "=== 3. 尝试常见 devkitPro tools 包路径 ==="
-          for URL in \
-            "https://wii.leseratte10.de/devkitPro/devkitpro-tools/" \
-            "https://wii.leseratte10.de/devkitPro/tools/"; do
-            echo "尝试: $URL"
-            wget -q --spider "$URL" && echo "  存在" || echo "  不存在"
-          done
-
-      - name: 创建 bin2s 等价脚本（devkitPro 格式）
+      - name: 创建 bin2s 等价脚本
         run: |
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
           mkdir -p /opt/devkitpro/tools/bin
-
-          # 确认 as 可用（bin2s 输出要喂给 as）
           if ! command -v as >/dev/null 2>&1; then
-            echo "as 不在 PATH，创建符号链接..."
             ln -sf /opt/devkitpro/devkitPPC/bin/powerpc-eabi-as /opt/devkitpro/devkitPPC/bin/as
           fi
-
           cat > /opt/devkitpro/tools/bin/bin2s << 'EOF'
-          #!/bin/bash
-          # 简易 bin2s：把二进制文件转成汇编（符号名与 devkitPro 一致，不带下划线前缀）
-          ALIGN=4
-          FILE=""
-          while [ $# -gt 0 ]; do
-            case "$1" in
-              -a) ALIGN="$2"; shift 2;;
-              *)  FILE="$1"; shift;;
-            esac
-          done
-          [ -n "$FILE" ] || { echo "usage: bin2s [-a align] file" >&2; exit 1; }
-          NAME=$(basename "$FILE" | sed 's/^\([0-9]\)/_\1/' | sed 's/[^A-Za-z0-9_]/_/g')
-          echo ".section .rodata"
-          echo ".align $ALIGN"
-          echo ".global $NAME"
-          echo "$NAME:"
-          echo ".incbin \"$FILE\""
-          echo ".global ${NAME}_end"
-          echo "${NAME}_end:"
-          echo ".global ${NAME}_size"
-          echo ".set ${NAME}_size, ${NAME}_end - ${NAME}"
-          EOF
+#!/bin/bash
+ALIGN=4
+FILE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -a) ALIGN="$2"; shift 2;;
+    *)  FILE="$1"; shift;;
+  esac
+done
+[ -n "$FILE" ] || { echo "usage: bin2s [-a align] file" >&2; exit 1; }
+NAME=$(basename "$FILE" | sed 's/^\([0-9]\)/_\1/' | sed 's/[^A-Za-z0-9_]/_/g')
+echo ".section .rodata"
+echo ".align $ALIGN"
+echo ".global $NAME"
+echo "$NAME:"
+echo ".incbin \"$FILE\""
+echo ".global ${NAME}_end"
+echo "${NAME}_end:"
+echo ".global ${NAME}_size"
+echo ".set ${NAME}_size, ${NAME}_end - ${NAME}"
+EOF
           chmod +x /opt/devkitpro/tools/bin/bin2s
 
-          echo "=== 测试 bin2s ==="
-          /opt/devkitpro/tools/bin/bin2s -a 32 /etc/hostname | head -10
-          echo "=== 测试管道到 as ==="
-          /opt/devkitpro/tools/bin/bin2s -a 32 /etc/hostname | as -o /tmp/test.o && echo "✅ bin2s + as 链路正常" || echo "!! as 有问题"
-
-      # ↓↓↓ 关键改动 1：构建只跑 Wii_Release 目标，不编 debug 版 ↓↓↓
       - name: 构建 WiiSXRX_Release（生成 .dol）
         run: |
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
 
-          # 0. 关键：去掉 -flto（LTO 导致 .elf 变成 17GB 稀疏文件）
-          echo "=== 去掉 -flto ==="
-          find Gamecube -name "Makefile*" -exec sed -i 's/-flto//g' {} \; 2>/dev/null || true
-          sed -i 's/-flto//g' /opt/devkitpro/devkitPPC/base_rules /opt/devkitpro/devkitPPC/wii_rules /opt/devkitpro/libogc2/wii_rules 2>/dev/null || true
-          grep -rn "flto" Gamecube/Makefile_Wii_Release /opt/devkitpro/devkitPPC/base_rules 2>/dev/null | head || echo "(已全部移除 -flto)"
-
-          # 0b. 清理旧的 build 目录（LTO 编译的 .o 必须重编）
-          rm -rf Gamecube/build_release Gamecube/build_debug
-
-          # 0c. elf2dol 尝试编译（失败无妨，Python 兜底）
-          mkdir -p /opt/devkitpro/tools/bin
-          [ -d /tmp/gct ] || git clone --depth=1 https://github.com/devkitPro/gamecube-tools /tmp/gct 2>/dev/null || true
-          (cd /tmp/gct/elftool && gcc -O2 -o elf2dol elf2dol.c 2>/dev/null) || true
-          cp -v /tmp/gct/elftool/elf2dol /opt/devkitpro/tools/bin/ 2>/dev/null || true
-          cd "$GITHUB_WORKSPACE"
-
+          # 传入关键变量（base_tools 补全后可按原版 make，这里保留保险）
           EXTRA="SILENTMSG=@echo SILENTCMD=@ \
             CC=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-gcc \
             CXX=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++ \
@@ -267,59 +123,118 @@ EOF
             LD=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++ \
             AR=/opt/devkitpro/devkitPPC/bin/powerpc-eabi-ar"
 
-          # 1. zlib 头文件
+          # 1. 补充 zlib 头文件
           mkdir -p /opt/devkitpro/libogc2/include
           cp -v deps/libchdr/deps/zlib-1.3.1/zlib.h \
                 deps/libchdr/deps/zlib-1.3.1/zconf.h \
                 /opt/devkitpro/libogc2/include/ 2>/dev/null || true
 
-          # 2. 先删除垃圾 .dol
-          rm -f Gamecube/WiiSXRX_Release.dol Gamecube/WiiSXRX_debug.dol
+          # 2. 第一次 make（编译依赖库，链接阶段缺 -lz / -lopengx 属预期）
+          make Wii_Release -j$(nproc) $EXTRA || echo "首次链接失败，库已生成"
 
-          # 3. 第一次 make（只编 Wii_Release，链接失败预期）
-          make Wii_Release -j$(nproc) $EXTRA || echo "⚠️ 首次构建链接失败，属预期"
-
-          # 4. 复制缺失库
+          # 3. 复制缺失库
           mkdir -p /opt/devkitpro/libogc2/lib/wii
           cp -v deps/libchdr/deps/zlib-1.3.1/bin/lib/libzlibstatic.a \
                 /opt/devkitpro/libogc2/lib/wii/libz.a
           cp -v deps/opengx/lib/libOpengx.a \
                 /opt/devkitpro/libogc2/lib/wii/libopengx.a
 
-          # 5. 第二次 make
-          make Wii_Release -j$(nproc) $EXTRA || echo "⚠️ make 在 elf2dol 阶段失败，改用 Python 转换"
+          # 4. 第二次 make（链接并生成 .dol）
+          make Wii_Release -j$(nproc) $EXTRA || echo "elf2dol 失败，由 Python 兜底"
 
-          # 6. 检查 .elf 大小（关键验证：应该只有几 MB~几十 MB）
-          ELF=$(find . -name "WiiSXRX_Release.elf" | head -1)
-          ELFSIZE=$(stat -c %s "$ELF")
-          echo "=== .elf 大小: $ELFSIZE 字节 ($((ELFSIZE/1024/1024)) MB) ==="
-          if [ "$ELFSIZE" -gt 209715200 ]; then   # > 200MB 判定异常
-            echo "!! .elf 仍超过 200MB，去掉 -flto 后仍异常，需要进一步排查"
-            echo "=== readelf 段信息 ==="
-            /opt/devkitpro/devkitPPC/bin/powerpc-eabi-readelf -l "$ELF" 2>/dev/null | head -60
-            exit 1
-          fi
-
-          # 7. Python 兜底转换（逻辑不变，验证大小）
+          # 5. Python ELF→DOL 转换（若 .dol 已正常生成则跳过）
           python3 - << 'PYEOF'
-          import struct, os
-          # ...（保持之前验证大小的转换脚本不变）...
+          import struct, os, sys
+
+          def elf_to_dol(data):
+              if data[:4] != b'\x7fELF' or data[4] != 1 or data[5] != 2:
+                  raise RuntimeError("not 32-bit BE ELF")
+              e_entry = struct.unpack_from('>I', data, 24)[0]
+              e_phoff = struct.unpack_from('>I', data, 28)[0]
+              e_phentsize = struct.unpack_from('>H', data, 42)[0]
+              e_phnum = struct.unpack_from('>H', data, 44)[0]
+              segs = []
+              for i in range(e_phnum):
+                  off = e_phoff + i * e_phentsize
+                  t, p_off, p_vaddr, p_paddr, p_fsz, p_msz, p_flags, _ = \
+                      struct.unpack_from('>IIIIIIII', data, off)
+                  if t == 1:
+                      segs.append((p_vaddr, p_off, p_fsz, p_msz, p_flags))
+              segs.sort(key=lambda s: s[0])
+              text, dta = [], []
+              for vaddr, off, fsz, msz, flags in segs:
+                  (text if flags & 1 else dta).append((vaddr, off, fsz))
+              bss_addr = bss_size = 0
+              if segs:
+                  lv, lo, lf, lm, lfl = segs[-1]
+                  if lm > lf:
+                      bss_addr = lv + lf
+                      bss_size = lm - lf
+              text += [None] * (7 - len(text))
+              dta  += [None] * (7 - len(dta))
+              hdr = bytearray(0x100)
+              pos = 0x100
+              tpos, dpos = [], []
+              for i in range(7):
+                  tpos.append(pos if text[i] else 0)
+                  if text[i]: pos = (pos + text[i][2] + 31) & ~31
+              for i in range(7):
+                  dpos.append(pos if dta[i] else 0)
+                  if dta[i]: pos = (pos + dta[i][2] + 31) & ~31
+              for i in range(7):
+                  struct.pack_into('>I', hdr, 0x00 + i*4, tpos[i])
+                  struct.pack_into('>I', hdr, 0x1C + i*4, dpos[i])
+                  struct.pack_into('>I', hdr, 0x38 + i*4, text[i][0] if text[i] else 0)
+                  struct.pack_into('>I', hdr, 0x54 + i*4, dta[i][0] if dta[i] else 0)
+                  struct.pack_into('>I', hdr, 0x70 + i*4, text[i][2] if text[i] else 0)
+                  struct.pack_into('>I', hdr, 0x8C + i*4, dta[i][2] if dta[i] else 0)
+              struct.pack_into('>I', hdr, 0xA8, bss_addr)
+              struct.pack_into('>I', hdr, 0xAC, bss_size)
+              struct.pack_into('>I', hdr, 0xB0, e_entry)
+              out = bytearray(hdr)
+              for i in range(7):
+                  if text[i]:
+                      v, o, s = text[i]
+                      out += data[o:o+s]
+                      out += b'\x00' * ((-len(out)) % 32)
+              for i in range(7):
+                  if dta[i]:
+                      v, o, s = dta[i]
+                      out += data[o:o+s]
+                      out += b'\x00' * ((-len(out)) % 32)
+              return bytes(out)
+
+          for root, dirs, files in os.walk('.'):
+              for fn in files:
+                  if fn == 'WiiSXRX_Release.elf':
+                      elf = os.path.join(root, fn)
+                      dol = elf[:-4] + '.dol'
+                      # 若已存在且大小合理则跳过
+                      if os.path.exists(dol):
+                          sz = os.path.getsize(dol)
+                          if 1048576 <= sz <= 314572800:
+                              print(f"✅ 已存在正常 .dol: {dol} ({sz // 1048576} MB)")
+                              continue
+                      print(f"转换: {elf}")
+                      with open(elf, 'rb') as f:
+                          data = f.read()
+                      out = elf_to_dol(data)
+                      if not 1048576 <= len(out) <= 314572800:
+                          raise RuntimeError(f"转换结果大小异常: {len(out)}")
+                      with open(dol, 'wb') as f:
+                          f.write(out)
+                      print(f"✅ 生成 {dol} ({len(out)} 字节)")
           PYEOF
 
-      # ↓↓↓ 关键改动 2：只收集 WiiSXRX_Release.dol ↓↓↓
       - name: 收集产物
         run: |
           set -e
           mkdir -p dist
-          # 找到 .dol，验证大小合理（10MB~300MB），不合理直接报错
           DOL=$(find . -name "WiiSXRX_Release.dol" | head -1)
-          echo "找到 .dol: $DOL"
           [ -n "$DOL" ] || { echo "!! 未找到 .dol"; exit 1; }
           SIZE=$(stat -c %s "$DOL")
-          echo "大小: $SIZE 字节 ($((SIZE/1024/1024)) MB)"
           if [ "$SIZE" -lt 1048576 ] || [ "$SIZE" -gt 314572800 ]; then
-            echo "!! .dol 大小异常，构建失败"
-            exit 1
+            echo "!! .dol 大小异常: $SIZE 字节"; exit 1
           fi
           cp -v "$DOL" dist/WiiSXRX_Release.dol
           ls -la dist/
