@@ -228,11 +228,20 @@ jobs:
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
 
-          # 补充 zlib 头文件（源码 include <zlib.h> 需要）
+          # 1. 补充 zlib 头文件
           mkdir -p /opt/devkitpro/libogc2/include
           cp -v deps/libchdr/deps/zlib-1.3.1/zlib.h \
                 deps/libchdr/deps/zlib-1.3.1/zconf.h \
                 /opt/devkitpro/libogc2/include/ 2>/dev/null || true
+
+          # 2. 重命名并安装 libz.a（zlib 静态库）
+          mkdir -p /opt/devkitpro/libogc2/lib/wii
+          cp -v deps/libchdr/deps/zlib-1.3.1/bin/lib/libzlibstatic.a \
+                /opt/devkitpro/libogc2/lib/wii/libz.a
+
+          # 3. 重命名并安装 libopengx.a（注意大小写：链接找小写 opengx）
+          cp -v deps/opengx/lib/libOpengx.a \
+                /opt/devkitpro/libogc2/lib/wii/libopengx.a
 
           make -j$(nproc) \
             SILENTMSG='@echo' \
