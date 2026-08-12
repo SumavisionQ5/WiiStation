@@ -219,7 +219,7 @@ jobs:
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
 
-          # 0. elf2dol 尝试编译（大概率运行失败，不用管，Python 兜底会接管）
+          # 0. elf2dol 尝试编译（大概率失败，Python 兜底接管）
           mkdir -p /opt/devkitpro/tools/bin
           [ -d /tmp/gct ] || git clone --depth=1 https://github.com/devkitPro/gamecube-tools /tmp/gct 2>/dev/null || true
           (cd /tmp/gct/elftool && gcc -O2 -o elf2dol elf2dol.c 2>/dev/null) || true
@@ -239,23 +239,26 @@ jobs:
                 deps/libchdr/deps/zlib-1.3.1/zconf.h \
                 /opt/devkitpro/libogc2/include/ 2>/dev/null || true
 
-          # 2. 第一次 make（只编 Wii_Release，链接失败预期）
+          # 2. 先删除可能存在的垃圾 .dol（避免被后续误收集）
+          rm -f Gamecube/WiiSXRX_Release.dol Gamecube/WiiSXRX_debug.dol
+
+          # 3. 第一次 make（只编 Wii_Release，链接失败预期）
           make Wii_Release -j$(nproc) $EXTRA || echo "⚠️ 首次构建链接失败，属预期"
 
-          # 3. 复制缺失库
+          # 4. 复制缺失库
           mkdir -p /opt/devkitpro/libogc2/lib/wii
           cp -v deps/libchdr/deps/zlib-1.3.1/bin/lib/libzlibstatic.a \
                 /opt/devkitpro/libogc2/lib/wii/libz.a
           cp -v deps/opengx/lib/libOpengx.a \
                 /opt/devkitpro/libogc2/lib/wii/libopengx.a
 
-          # 4. 第二次 make（只编 Wii_Release，.elf 已生成，elf2dol 失败忽略）
+          # 5. 第二次 make（.elf 已生成，elf2dol 失败忽略）
           make Wii_Release -j$(nproc) $EXTRA || echo "⚠️ make 在 elf2dol 阶段失败，改用 Python 转换"
 
-          # 5. Python 兜底：只转换 WiiSXRX_Release.elf → WiiSXRX_Release.dol
+          # 6. Python 兜底：转换前删旧 .dol，转换后验证大小
           echo "=== Python ELF→DOL 兜底转换 ==="
           python3 - << 'PYEOF'
-          import struct, os
+          import struct, os, sys
 
           def conv(elf_path, dol_path):
               with open(elf_path, 'rb') as f:
@@ -323,28 +326,48 @@ jobs:
                       v, o, s = dta[i]
                       out += data[o:o+s]
                       out += b'\x00' * ((-len(out)) % 32)
-              with open(dol_path, 'wb') as f:
-                  f.write(out)
-              print(f"✅ {dol_path} 生成成功 ({len(out)} 字节)")
+              return out
 
-          # ↓↓↓ 只处理 WiiSXRX_Release.elf，跳过 debug 版 ↓↓↓
           for root, dirs, files in os.walk('.'):
               for fn in files:
                   if fn == 'WiiSXRX_Release.elf':
                       elf = os.path.join(root, fn)
                       dol = elf[:-4] + '.dol'
+                      print(f"转换: {elf} ({os.path.getsize(elf)} 字节)")
                       try:
-                          conv(elf, dol)
+                          # 先删除垃圾文件，再重新生成
+                          if os.path.exists(dol):
+                              os.remove(dol)
+                          out = conv(elf, dol)
+                          # 关键：验证大小合理（应和 .elf 相当，绝不可能 > 300MB）
+                          if len(out) > 300 * 1024 * 1024 or len(out) < 0x100:
+                              raise RuntimeError(f"生成的 .dol 大小异常: {len(out)} 字节")
+                          with open(dol, 'wb') as f:
+                              f.write(out)
+                          print(f"✅ {dol} 生成成功 ({len(out)} 字节)")
                       except Exception as e:
+                          # 转换失败时删除残留，避免上传垃圾
+                          if os.path.exists(dol):
+                              os.remove(dol)
                           print(f"⚠️ {elf}: {e}")
           PYEOF
 
       # ↓↓↓ 关键改动 2：只收集 WiiSXRX_Release.dol ↓↓↓
       - name: 收集产物
         run: |
+          set -e
           mkdir -p dist
-          find . -name "WiiSXRX_Release.dol" -exec ls -la {} \;
-          find . -name "WiiSXRX_Release.dol" -exec cp -v {} dist/ \;
+          # 找到 .dol，验证大小合理（10MB~300MB），不合理直接报错
+          DOL=$(find . -name "WiiSXRX_Release.dol" | head -1)
+          echo "找到 .dol: $DOL"
+          [ -n "$DOL" ] || { echo "!! 未找到 .dol"; exit 1; }
+          SIZE=$(stat -c %s "$DOL")
+          echo "大小: $SIZE 字节 ($((SIZE/1024/1024)) MB)"
+          if [ "$SIZE" -lt 1048576 ] || [ "$SIZE" -gt 314572800 ]; then
+            echo "!! .dol 大小异常，构建失败"
+            exit 1
+          fi
+          cp -v "$DOL" dist/WiiSXRX_Release.dol
           ls -la dist/
 
       - name: 上传编译产物
