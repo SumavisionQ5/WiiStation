@@ -64,17 +64,50 @@ jobs:
           echo "=== /opt/devkitpro ==="
           ls /opt/devkitpro
 
-      - name: 下载并安装作者的预编译库（libogc2 + Lightning + Lightrec）
+      - name: 下载并安装作者的预编译库（libogc2 + Lightning + Lightrec + 修改版 rules）
         run: |
           set -e
-          wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec%2BLibogc2.zip" -O libs.zip || \
-          wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec+Libogc2.zip" -O libs.zip
+          # 两种 URL 写法都试（+ 在 URL 里可能被当空格）
+          for URL in \
+            "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec%2BLibogc2.zip" \
+            "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec+Libogc2.zip"; do
+            echo "尝试下载: $URL"
+            wget -q "$URL" -O libs.zip && break
+          done
+          echo "=== 校验下载文件 ==="
+          file libs.zip
           ls -la libs.zip
+          unzip -t libs.zip | tail -3 || { echo "!! zip 校验失败"; exit 1; }
+
+          echo "=== 解压 ==="
+          rm -rf /tmp/libs
           mkdir -p /tmp/libs
           unzip -o libs.zip -d /tmp/libs
-          echo "=== zip 内容结构 ==="
-          find /tmp/libs -maxdepth 3 | head -50
+          echo "=== zip 内容结构（顶层）==="
+          find /tmp/libs -maxdepth 2 | head -40
+          echo "=== zip 里的 wii_rules ==="
+          find /tmp/libs -name "wii_rules" 2>/dev/null || echo "(zip 里没有 wii_rules)"
+
+          echo "=== 合并到 /opt/devkitpro ==="
           cp -r /tmp/libs/* /opt/devkitpro/ 2>/dev/null || true
+          echo "=== 安装后 wii_rules 位置 ==="
+          find /opt/devkitpro -name "wii_rules" 2>/dev/null || echo "(仍找不到 wii_rules)"
+
+      - name: 确保 wii_rules 就位（构建前保障）
+        run: |
+          set -e
+          if [ ! -f /opt/devkitpro/devkitPPC/wii_rules ]; then
+            echo "!! /opt/devkitpro/devkitPPC/wii_rules 缺失，尝试从 zip 残留或标准位置恢复..."
+            find /opt/devkitpro /tmp/libs -name "wii_rules" 2>/dev/null \
+              -exec cp {} /opt/devkitpro/devkitPPC/wii_rules \; 2>/dev/null || true
+          fi
+          if [ -f /opt/devkitpro/devkitPPC/wii_rules ]; then
+            echo "✅ wii_rules 就位:"
+            ls -la /opt/devkitpro/devkitPPC/wii_rules
+          else
+            echo "!! 仍然没有 wii_rules，构建会失败，请查看上方 zip 结构日志"
+            exit 1
+          fi
 
       - name: 安装作者的 libSDL.a
         run: |
