@@ -212,6 +212,17 @@ jobs:
           echo "=== 测试管道到 as ==="
           /opt/devkitpro/tools/bin/bin2s -a 32 /etc/hostname | as -o /tmp/test.o && echo "✅ bin2s + as 链路正常" || echo "!! as 有问题"
 
+      - name: 诊断 GamecubeMain.cpp 路径问题
+        run: |
+          echo "=== Gamecube 目录内容 ==="
+          ls -la Gamecube/ 2>/dev/null
+          echo "=== 全仓库查找 GamecubeMain.cpp ==="
+          find . -name "GamecubeMain.cpp" 2>/dev/null
+          echo "=== Makefile_Wii_Release 中 SOURCES/VPATH 相关行 ==="
+          grep -nE "SOURCES|VPATH|CPPFILES|CFILES|BUILD" Gamecube/Makefile_Wii_Release 2>/dev/null | head -30
+          echo "=== base_rules 第 1~20 行 ==="
+          sed -n '1,20p' /opt/devkitpro/devkitPPC/base_rules
+
       - name: 构建
         run: |
           set -e
