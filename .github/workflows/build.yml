@@ -152,38 +152,43 @@ jobs:
           find /opt/devkitpro -name "liblightrec*" 2>/dev/null | head
           find /opt/devkitpro -name "liblightning*" 2>/dev/null | head
 
-      - name: 安装 devkitPro tools（bin2s / elf2dol 等）
+      - name: 安装 devkitPro tools（从官方镜像提取 bin2s）
         run: |
           set -e
           export PATH="/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH"
 
-          echo "=== 检查 bin2s 是否已存在 ==="
+          echo "=== 检查 bin2s ==="
           find /opt/devkitpro -name "bin2s" 2>/dev/null || true
 
           if [ ! -x /opt/devkitpro/tools/bin/bin2s ]; then
-            echo "=== 从 devkitPro 官方 pacman 仓库下载 devkitpro-tools 包 ==="
-            # devkitPro 官方 Linux 仓库
-            REPO="https://pkg.devkitpro.org/devkitpro-linux"
-            echo "=== 列出仓库中的 tools 包 ==="
-            wget -qO- "$REPO/x86_64/" 2>/dev/null | grep -oE 'devkitpro-tools[^"<]*\.pkg\.tar\.(zst|xz)' | sort -u | tail -5 || true
-
-            PKG=$(wget -qO- "$REPO/x86_64/" 2>/dev/null | grep -oE 'devkitpro-tools[^"<]*\.pkg\.tar\.zst' | sort -u | tail -1)
-            echo "解析到包: $PKG"
-            [ -n "$PKG" ] || { echo "!! 仓库解析失败"; exit 1; }
-            wget -q "$REPO/x86_64/$PKG" -O tools.pkg.tar.zst
-            ls -la tools.pkg.tar.zst
-
-            mkdir -p /tmp/tools
-            tar -xf tools.pkg.tar.zst -C /tmp/tools
-            echo "=== 包内容 ==="
-            find /tmp/tools -maxdepth 4 -name "bin2s" -o -maxdepth 4 -name "elf2dol" 2>/dev/null
-            # 合并到 /opt/devkitpro
-            cp -r /tmp/tools/opt/devkitpro/* /opt/devkitpro/ 2>/dev/null || \
-            cp -r /tmp/tools/usr/* /opt/devkitpro/ 2>/dev/null || true
+            echo "=== 安装 skopeo 并提取 devkitPro 官方镜像中的 bin2s ==="
+            apt-get install -y skopeo || apt-get install -y skopeo
+            mkdir -p /tmp/dkp-img
+            # 用 skopeo copy 把镜像文件系统拷出来
+            skopeo copy docker://devkitpro/devkitppc:latest dir:/tmp/dkp-img
+            # 解包最底层的 layer 找 bin2s
+            for layer in /tmp/dkp-img/*/layer.tar; do
+              [ -f "$layer" ] || continue
+              tar -tf "$layer" 2>/dev/null | grep -q "tools/bin/bin2s" && {
+                echo "在 $layer 中找到 bin2s"
+                tar -xf "$layer" -C /opt/devkitpro ./opt/devkitpro/tools/bin/ 2>/dev/null || \
+                tar -xf "$layer" -C /opt/devkitpro ./opt/devkitpro/tools 2>/dev/null || true
+                break
+              }
+            done
           fi
 
           echo "=== 验证 bin2s ==="
-          ls -la /opt/devkitpro/tools/bin/bin2s 2>/dev/null && echo "✅ bin2s 就位" || echo "!! bin2s 仍缺失"
+          if [ -x /opt/devkitpro/tools/bin/bin2s ]; then
+            chmod +x /opt/devkitpro/tools/bin/bin2s
+            echo "✅ bin2s 就位"
+            /opt/devkitpro/tools/bin/bin2s 2>&1 | head -3 || true
+          else
+            echo "!! bin2s 仍缺失"
+            # 兜底：列出 tools 目录
+            ls -la /opt/devkitpro/tools/bin/ 2>/dev/null || echo "(无 tools 目录)"
+            exit 1
+          fi
 
       - name: 构建
         run: |
