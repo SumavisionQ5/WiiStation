@@ -143,15 +143,21 @@ jobs:
           # 2. 第一次 make（编库；此时 libchdr.a 尚未合并，链接失败属预期）
           make Wii_Release -j$(nproc) $EXTRA || echo "首次构建失败，继续尝试"
 
-          # 3. 关键：把 lzma/zstd 的 .o 合并进 libchdr.a（解决静态库链接顺序）
-          echo "=== 合并 lzma/zstd 到 libchdr.a ==="
+          # 3. 合并 lzma/zstd + opengx 到 libchdr.a（解决链接顺序）
+          echo "=== 合并 lzma/zstd/opengx 到 libchdr.a ==="
           rm -rf /tmp/m && mkdir -p /tmp/m && cd /tmp/m
           ar x "$GITHUB_WORKSPACE/deps/libchdr/lib/libchdr.a" 2>/dev/null || true
           ar x "$GITHUB_WORKSPACE/deps/libchdr/deps/lzma-19.00/lib/liblzma.a" 2>/dev/null || true
           ar x "$GITHUB_WORKSPACE/deps/libchdr/deps/zstd-1.5.6/bin/lib/libzstd.a" 2>/dev/null || true
+          ar x "$GITHUB_WORKSPACE/deps/opengx/lib/libOpengx.a" 2>/dev/null || true   # ← 新增
           ar rcs "$GITHUB_WORKSPACE/deps/libchdr/lib/libchdr.a" *.o
           echo "✅ libchdr.a 合并了 $(ls *.o | wc -l) 个目标文件"
           cd "$GITHUB_WORKSPACE"
+          
+          echo "=== 查找 CDR__configure 定义 ==="
+          grep -rn "CDR__configure" --include="*.c" --include="*.h" . 2>/dev/null | head -10
+          echo "=== 查找 CDR 插件相关源文件 ==="
+          find . -iname "cdr*.c" -o -iname "cdr*.h" 2>/dev/null | head -20
 
           # 3b. 复制 zlib / opengx 库（保险）
           mkdir -p deps/libchdr/lib
