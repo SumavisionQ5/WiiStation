@@ -64,34 +64,40 @@ jobs:
           echo "=== /opt/devkitpro ==="
           ls /opt/devkitpro
 
-      - name: 下载并安装作者的预编译库（libogc2 + Lightning + Lightrec + 修改版 rules）
+      - name: 下载并安装作者的预编译库（分目录精确安装）
         run: |
           set -e
-          # 两种 URL 写法都试（+ 在 URL 里可能被当空格）
+          # 下载（两种 URL 写法都试）
           for URL in \
             "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec%2BLibogc2.zip" \
             "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/lightrec+Libogc2.zip"; do
             echo "尝试下载: $URL"
             wget -q "$URL" -O libs.zip && break
           done
-          echo "=== 校验下载文件 ==="
           file libs.zip
-          ls -la libs.zip
           unzip -t libs.zip | tail -3 || { echo "!! zip 校验失败"; exit 1; }
 
-          echo "=== 解压 ==="
-          rm -rf /tmp/libs
-          mkdir -p /tmp/libs
+          rm -rf /tmp/libs && mkdir -p /tmp/libs
           unzip -o libs.zip -d /tmp/libs
-          echo "=== zip 内容结构（顶层）==="
-          find /tmp/libs -maxdepth 2 | head -40
-          echo "=== zip 里的 wii_rules ==="
-          find /tmp/libs -name "wii_rules" 2>/dev/null || echo "(zip 里没有 wii_rules)"
 
-          echo "=== 合并到 /opt/devkitpro ==="
-          cp -r /tmp/libs/* /opt/devkitpro/ 2>/dev/null || true
-          echo "=== 安装后 wii_rules 位置 ==="
-          find /opt/devkitpro -name "wii_rules" 2>/dev/null || echo "(仍找不到 wii_rules)"
+          echo "=== 定位 zip 内的关键目录 ==="
+          DEVKITPPC_DIR=$(find /tmp/libs -maxdepth 3 -type d -name "devkitPPC" | head -1)
+          LIBOGC2_DIR=$(find /tmp/libs -maxdepth 3 -type d -name "libogc2" | head -1)
+          PORTLIBS_DIR=$(find /tmp/libs -maxdepth 3 -type d -name "portlibs" | head -1)
+          echo "devkitPPC 目录: $DEVKITPPC_DIR"
+          echo "libogc2 目录: $LIBOGC2_DIR"
+          echo "portlibs 目录: $PORTLIBS_DIR"
+
+          # 逐个复制到目标位置（保留目录结构）
+          [ -n "$DEVKITPPC_DIR" ] && mkdir -p /opt/devkitpro/devkitPPC && cp -r "$DEVKITPPC_DIR/." /opt/devkitpro/devkitPPC/
+          [ -n "$LIBOGC2_DIR" ] && mkdir -p /opt/devkitpro/libogc2 && cp -r "$LIBOGC2_DIR/." /opt/devkitpro/libogc2/
+          [ -n "$PORTLIBS_DIR" ] && mkdir -p /opt/devkitpro/portlibs && cp -r "$PORTLIBS_DIR/." /opt/devkitpro/portlibs/
+
+          echo "=== 验证关键文件 ==="
+          ls -la \
+            /opt/devkitpro/devkitPPC/base_rules \
+            /opt/devkitpro/devkitPPC/wii_rules \
+            /opt/devkitpro/libogc2/wii_rules 2>/dev/null || { echo "!! 仍有文件缺失"; exit 1; }
 
       - name: 确保 wii_rules 就位（构建前保障）
         run: |
