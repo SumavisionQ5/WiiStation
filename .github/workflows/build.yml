@@ -223,6 +223,21 @@ jobs:
           echo "=== base_rules 第 1~20 行 ==="
           sed -n '1,20p' /opt/devkitpro/devkitPPC/base_rules
 
+      - name: 诊断 elf2dol 编译环境
+        run: |
+          set -e
+          echo "=== elftool 目录完整内容 ==="
+          ls -la /tmp/gct/elftool/ 2>/dev/null || {
+            git clone --depth=1 https://github.com/devkitPro/gamecube-tools /tmp/gct
+            ls -la /tmp/gct/elftool/
+          }
+          echo "=== elf2dol.c 的 include 行 ==="
+          grep -n "#include" /tmp/gct/elftool/elf2dol.c
+          echo "=== elf2dol.c 中报错相关代码 ==="
+          grep -n "Bad address\|reading ELF segment\|pread\|malloc" /tmp/gct/elftool/elf2dol.c | head -20
+          echo "=== bswap.h 是否存在 ==="
+          ls -la /tmp/gct/elftool/bswap.h 2>/dev/null || echo "(无 bswap.h)"
+
       - name: 构建 WiiSXRX（生成 .dol）
         run: |
           set -e
