@@ -127,44 +127,37 @@ jobs:
           wget -q "https://github.com/xjsxjs197/WiiSXRX_2022/raw/main/libSDL.a" -O /opt/devkitpro/portlibs/wii/lib/libSDL.a
           ls -la /opt/devkitpro/portlibs/wii/lib/libSDL.a
 
-      - name: 诊断并补齐 base_tools
+      - name: 从 buildscripts 历史包提取 base_tools
         run: |
           set -e
-          echo "=== devkitPPC 目录当前内容 ==="
-          ls -la /opt/devkitpro/devkitPPC/ | head -30
-          echo "=== 系统里查找 base_tools ==="
-          find / -name "base_tools" 2>/dev/null | head
+          echo "=== 列出所有 buildscripts 历史包 ==="
+          wget -qO- "https://wii.leseratte10.de/devkitPro/buildscripts/" \
+            | grep -oE 'buildscripts-[0-9]+\.tar\.(gz|bz2)' | sort -u
 
-      - name: 从官方镜像提取正确的 base_tools
-        run: |
-          set -e
-          echo "=== 检查当前 base_tools ==="
-          ls -la /opt/devkitpro/devkitPPC/base_tools 2>/dev/null || echo "(不存在)"
-          wc -c /opt/devkitpro/devkitPPC/base_tools 2>/dev/null || true
+          # 下载 2020 年那个已知存在的包（含规则文件）
+          wget -q "https://wii.leseratte10.de/devkitPro/buildscripts/buildscripts-20200412.tar.bz2" \
+            -O /tmp/bs.tar.bz2
+          ls -la /tmp/bs.tar.bz2
+          mkdir -p /tmp/bs
+          tar -xjf /tmp/bs.tar.bz2 -C /tmp/bs
 
-          # 如果 base_tools 是空文件或缺失，从官方镜像提取
-          if [ ! -s /opt/devkitpro/devkitPPC/base_tools ]; then
-            echo "=== base_tools 为空/缺失，从官方镜像提取 ==="
-            apt-get install -y skopeo >/dev/null 2>&1 || apt-get install -y skopeo
-            rm -rf /tmp/dkp-img
-            mkdir -p /tmp/dkp-img
-            skopeo copy docker://devkitpro/devkitppc:latest dir:/tmp/dkp-img
+          echo "=== 包内查找 base_tools / base_rules ==="
+          find /tmp/bs -name "base_tools" -o -name "base_rules" 2>/dev/null
 
-            echo "=== 在镜像层中查找 base_tools ==="
-            for layer in /tmp/dkp-img/*/layer.tar; do
-              [ -f "$layer" ] || continue
-              if tar -tf "$layer" 2>/dev/null | grep -q "opt/devkitpro/devkitPPC/base_tools"; then
-                echo "在 $layer 中找到 base_tools"
-                tar -xf "$layer" -C / ./opt/devkitpro/devkitPPC/base_tools
-                echo "✅ 提取成功"
-                break
-              fi
-            done
+          echo "=== 复制 base_tools 到正确位置 ==="
+          mkdir -p /opt/devkitpro/devkitPPC
+          BASE_TOOLS=$(find /tmp/bs -name "base_tools" | head -1)
+          if [ -n "$BASE_TOOLS" ]; then
+            cp -v "$BASE_TOOLS" /opt/devkitpro/devkitPPC/base_tools
+          else
+            echo "!! 未找到 base_tools，列出包内容供分析"
+            find /tmp/bs -maxdepth 3 -type d | head -40
+            exit 1
           fi
 
-          echo "=== 验证 base_tools 内容（关键！）==="
+          echo "=== 验证 base_tools 内容 ==="
           wc -c /opt/devkitpro/devkitPPC/base_tools
-          grep -E "SILENTMSG|SILENTCMD|export CXX|export CC|BIN2S|ELF2DOL|LDSCRIPT" \
+          grep -E "SILENTMSG|SILENTCMD|export CXX|export CC|export AR|ERROR_FILTER|BIN2S|ELF2DOL" \
             /opt/devkitpro/devkitPPC/base_tools | head -10
 
       - name: 设置环境变量并验证工具链
